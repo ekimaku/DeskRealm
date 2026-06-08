@@ -1,0 +1,31 @@
+# Build output
+bin/
+obj/
+dist/
+publish/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Logs / local runtime data
+*.log
+logs/
+DeskRealm.App.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# NuGet
+*.nupkg
+packages/
+
+# Local config / secrets
+*.local.json
+*.secrets.json

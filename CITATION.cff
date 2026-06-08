@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If DeskRealm helps your project, please cite it and preserve LICENSE/NOTICE when required by Apache-2.0."
+title: "DeskRealm: virtual desktop realms for Windows"
+version: "0.5.0"
+date-released: "2026-06-08"
+type: software
+authors:
+  - name: "Ayahua"
+abstract: "DeskRealm maps each Windows virtual desktop to its own Desktop folder, synchronizes realm folder names with Task View names, persists icon layouts per realm, adds direct configurable hotkeys, and optionally starts with Windows."
+license: "Apache-2.0"
+repository-code: "https://github.com/ekimaku/DeskRealm"
+keywords:
+  - "windows"
+  - "virtual-desktops"
+  - "desktop-icons"
+  - "known-folders"
+  - "productivity"

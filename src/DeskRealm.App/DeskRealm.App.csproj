@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>DeskRealm.App</AssemblyName>
+    <RootNamespace>DeskRealm.App</RootNamespace>
+    <Version>0.5.0</Version>
+    <Authors>Ayahua</Authors>
+    <Company>Ayahua</Company>
+    <Copyright>Copyright (c) 2026 Ayahua</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/ekimaku/DeskRealm</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ekimaku/DeskRealm</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+</Project>

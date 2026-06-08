@@ -1,0 +1,10 @@
+* text=auto
+*.cs text eol=crlf
+*.sln text eol=crlf
+*.csproj text eol=crlf
+*.ps1 text eol=crlf
+*.md text eol=lf
+*.json text eol=lf
+*.cff text eol=lf
+LICENSE text eol=lf
+NOTICE text eol=lf
