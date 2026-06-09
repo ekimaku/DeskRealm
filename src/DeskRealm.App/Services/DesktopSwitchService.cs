@@ -65,7 +65,11 @@ internal sealed class DesktopSwitchService
         _logger.Info($"Realms root: {Config.RealmsRoot}");
         _logger.Info($"Realm name sync: {Config.SyncRealmNamesWithVirtualDesktopNames}");
         _logger.Info($"Icon layout persistence: {Config.IconLayoutPersistenceEnabled}");
-        _logger.Info($"Icon layout autosave: {Config.IconLayoutAutoSaveEnabled} / {Config.IconLayoutAutoSaveIntervalMs} ms");
+        _logger.Info($"Icon layout background autosave: {Config.IconLayoutAutoSaveEnabled} / {Config.IconLayoutAutoSaveIntervalMs} ms");
+        if (!Config.IconLayoutAutoSaveEnabled)
+        {
+            _logger.Info("Icon layout background autosave disabled. Layouts are saved on desktop switch, manual save, and exit restore.");
+        }
         _logger.Info($"Icon layout worker timeout: {Config.IconLayoutWorkerTimeoutMs} ms");
         _logger.Info($"Desktop hotkeys: {Config.DesktopHotkeysEnabled} / {string.Join(", ", Config.DesktopHotkeys.Select(p => $"#{p.Key}={p.Value}"))}");
         _logger.Info($"Hotkey switch timing: initial={Config.HotkeyInitialDelayMs} ms, step={Config.HotkeySwitchStepDelayMs} ms, settle={Config.HotkeySwitchSettleTimeoutMs} ms");
@@ -92,12 +96,10 @@ internal sealed class DesktopSwitchService
             _lastDesktopId.Value == current.Id &&
             string.Equals(currentKnownDesktop, realmPath, StringComparison.OrdinalIgnoreCase))
         {
-            AutoSaveIconLayoutIfDue(currentKnownDesktop);
             return;
         }
 
         SwitchTo(current, realmPath);
-        AutoSaveIconLayoutIfDue(_knownFolder.GetDesktopPath(), forceDelayReset: true);
     }
 
     public void SwitchNow()
@@ -211,7 +213,6 @@ internal sealed class DesktopSwitchService
 
         var realmName = Path.GetFileName(realmPath);
         _iconLayouts.Restore(current.Id, realmName, Config.IconLayoutWorkerTimeoutMs);
-        _shellRefresh.RefreshDesktop(realmPath);
         _lastMessage = $"Layout icônes restauré : {Path.GetFileName(realmPath)}";
         _logger.Info(_lastMessage);
     }
@@ -226,6 +227,8 @@ internal sealed class DesktopSwitchService
 
     public void RestoreOriginalDesktop()
     {
+        SaveIconLayoutForKnownDesktopIfRealm(_knownFolder.GetDesktopPath(), "restore-original/save-before-restore");
+
         var original = Config.OriginalDesktopPath
             ?? throw new InvalidOperationException("originalDesktopPath absent dans la config.");
 
@@ -476,7 +479,7 @@ internal sealed class DesktopSwitchService
         _shellRefresh.RefreshDesktop(original);
     }
 
-    private void SaveIconLayoutForKnownDesktopIfRealm(string knownDesktopPath)
+    private void SaveIconLayoutForKnownDesktopIfRealm(string knownDesktopPath, string reason = "switch-save")
     {
         if (!Config.IconLayoutPersistenceEnabled)
         {
@@ -485,65 +488,25 @@ internal sealed class DesktopSwitchService
 
         if (_iconLayoutsDisabledForSession)
         {
-            _logger.Warn($"Icon layout auto-save skipped: feature disabled for this session. Reason: {_iconLayoutsDisabledReason}");
+            _logger.Warn($"Icon layout {reason} skipped: feature disabled for this session. Reason: {_iconLayoutsDisabledReason}");
             return;
         }
 
         if (!TryFindAssignmentByRealmPath(knownDesktopPath, out var desktopId, out var realmName))
         {
-            _logger.Info($"Icon layout save skipped: active Desktop is not an assigned DeskRealm realm ({knownDesktopPath}).");
+            _logger.Info($"Icon layout {reason} skipped: active Desktop is not an assigned DeskRealm realm ({knownDesktopPath}).");
             return;
         }
 
-        try
-        {
-            _iconLayouts.Save(desktopId, realmName, Config.IconLayoutWorkerTimeoutMs);
-            _lastIconAutoSaveAt = DateTimeOffset.Now;
-        }
-        catch (Exception ex)
-        {
-            DisableIconLayoutsForSession("auto-save", ex);
-        }
-    }
-
-    private void AutoSaveIconLayoutIfDue(string knownDesktopPath, bool forceDelayReset = false)
-    {
-        if (!Config.IconLayoutPersistenceEnabled || !Config.IconLayoutAutoSaveEnabled)
-        {
-            return;
-        }
-
-        if (_iconLayoutsDisabledForSession)
-        {
-            return;
-        }
-
-        if (!TryFindAssignmentByRealmPath(knownDesktopPath, out var desktopId, out var realmName))
-        {
-            return;
-        }
-
-        var now = DateTimeOffset.Now;
-        if (forceDelayReset)
-        {
-            _lastIconAutoSaveAt = now;
-            return;
-        }
-
-        if ((now - _lastIconAutoSaveAt).TotalMilliseconds < Config.IconLayoutAutoSaveIntervalMs)
-        {
-            return;
-        }
-
-        _lastIconAutoSaveAt = now;
         try
         {
             _iconLayouts.SaveIfChanged(desktopId, realmName, Config.IconLayoutWorkerTimeoutMs);
             _lastIconAutoSaveAt = DateTimeOffset.Now;
+            _logger.Info($"Icon layout {reason} checked/saved: {realmName} {desktopId:B}");
         }
         catch (Exception ex)
         {
-            DisableIconLayoutsForSession("auto-save-if-changed", ex);
+            DisableIconLayoutsForSession(reason, ex);
         }
     }
 
@@ -569,7 +532,6 @@ internal sealed class DesktopSwitchService
         try
         {
             _iconLayouts.Restore(desktop.Id, realmName, Config.IconLayoutWorkerTimeoutMs);
-            _shellRefresh.RefreshDesktop(realmPath);
         }
         catch (Exception ex)
         {

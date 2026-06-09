@@ -5,7 +5,7 @@ namespace DeskRealm.App.Services;
 internal sealed class RealmConfig
 {
     [JsonPropertyName("version")]
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
@@ -32,10 +32,10 @@ internal sealed class RealmConfig
     public int IconLayoutSettleDelayMs { get; set; } = 500;
 
     [JsonPropertyName("iconLayoutAutoSaveEnabled")]
-    public bool IconLayoutAutoSaveEnabled { get; set; } = true;
+    public bool IconLayoutAutoSaveEnabled { get; set; } = false;
 
     [JsonPropertyName("iconLayoutAutoSaveIntervalMs")]
-    public int IconLayoutAutoSaveIntervalMs { get; set; } = 10000;
+    public int IconLayoutAutoSaveIntervalMs { get; set; } = 60000;
 
     [JsonPropertyName("iconLayoutWorkerTimeoutMs")]
     public int IconLayoutWorkerTimeoutMs { get; set; } = 8000;

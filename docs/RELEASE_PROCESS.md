@@ -11,8 +11,8 @@ Every push to `main` builds the app and uploads workflow artifacts.
 Create and push a tag:
 
 ```powershell
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.5.1
+git push origin v0.5.1
 ```
 
 The `Build and release` workflow will:
@@ -31,3 +31,15 @@ The `Build and release` workflow will:
 ## Notes
 
 DeskRealm does not currently ship a signed MSI/EXE installer. The install bundle is intentionally transparent PowerShell so users can inspect what it does before running it. A signed MSI may be added later if the project grows.
+
+## Local release helper
+
+A local helper script can be kept in `.local-tools/Publish-DeskRealmRelease.ps1`. The folder is ignored by Git on purpose, so maintainer automation does not become part of the public repository.
+
+Typical command:
+
+```powershell
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.1
+```
+
+The helper uses `CHANGELOG.md` as the source for the GitHub Release body and updates the release after the tag-triggered workflow has created the assets.

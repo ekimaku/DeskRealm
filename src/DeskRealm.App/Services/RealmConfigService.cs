@@ -50,6 +50,22 @@ internal sealed class RealmConfigService
             _logger.Warn($"realmsRoot absent : initialisé à {config.RealmsRoot}");
         }
 
+        if (config.Version < 2)
+        {
+            if (config.IconLayoutAutoSaveEnabled)
+            {
+                config.IconLayoutAutoSaveEnabled = false;
+                _logger.Warn("Migration config v2 : iconLayoutAutoSaveEnabled désactivé pour supprimer le polling Shell périodique.");
+            }
+
+            if (config.IconLayoutAutoSaveIntervalMs < 60000)
+            {
+                config.IconLayoutAutoSaveIntervalMs = 60000;
+            }
+
+            config.Version = 2;
+        }
+
         if (config.PollIntervalMs < 250)
         {
             throw new InvalidOperationException("pollIntervalMs est trop bas. Valeur minimale stricte : 250 ms.");
@@ -75,9 +91,9 @@ internal sealed class RealmConfigService
             throw new InvalidOperationException("iconLayoutWorkerTimeoutMs invalide. Valeur stricte autorisée : 1000 à 60000 ms.");
         }
 
-        if (config.IconLayoutAutoSaveIntervalMs is < 2000 or > 300000)
+        if (config.IconLayoutAutoSaveIntervalMs is < 0 or > 300000)
         {
-            throw new InvalidOperationException("iconLayoutAutoSaveIntervalMs invalide. Valeur stricte autorisée : 2000 à 300000 ms.");
+            throw new InvalidOperationException("iconLayoutAutoSaveIntervalMs invalide. Valeur stricte autorisée : 0 à 300000 ms.");
         }
 
         if (config.HotkeySwitchStepDelayMs is < 50 or > 1500)

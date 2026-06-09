@@ -1,11 +1,18 @@
-# DeskRealm v0.5.0 — Static smoke test
+# DeskRealm v0.5.1 — Static smoke test
 
 This package was prepared in a Linux sandbox without the Windows .NET Desktop SDK runtime, so a real `dotnet publish` could not be executed here.
 
 Static checks performed:
 
 - [x] Root ZIP folder is `DeskRealm/`.
-- [x] Project version is `0.5.0`.
+- [x] Project version is `0.5.1`.
+- [x] Config version is `2`.
+- [x] Background icon autosave default is `false`.
+- [x] Config migration disables old v1 periodic autosave settings.
+- [x] `Tick()` no longer launches periodic icon save when the desktop did not change.
+- [x] Layout save still runs before desktop switch.
+- [x] Layout save runs before restoring the original Desktop path.
+- [x] Post-restore Shell refresh after icon placement was removed.
 - [x] `LICENSE` exists and contains Apache-2.0.
 - [x] `NOTICE` exists.
 - [x] `CITATION.cff` exists.
@@ -30,7 +37,9 @@ Functional checks:
 - [ ] switch virtual desktops with `Win + Tab`;
 - [ ] confirm realm folder changes;
 - [ ] confirm Task View names sync to folders;
-- [ ] move icons and wait for autosave;
+- [ ] move icons, switch away, return, confirm layout is saved/restored;
+- [ ] quit DeskRealm, relaunch, confirm last active realm layout was saved before restore;
+- [ ] confirm no periodic busy-cursor flicker while idle;
 - [ ] use direct hotkeys;
 - [ ] toggle startup with Windows;
 - [ ] test emergency restore script.

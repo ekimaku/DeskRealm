@@ -38,14 +38,14 @@
 ## Create release
 
 ```powershell
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.5.1
+git push origin v0.5.1
 ```
 
 The GitHub Actions workflow will build and attach:
 
-- `DeskRealm-0.5.0-win-x64-portable.zip`
-- `DeskRealm-0.5.0-win-x64-install-bundle.zip`
+- `DeskRealm-0.5.1-win-x64-portable.zip`
+- `DeskRealm-0.5.1-win-x64-install-bundle.zip`
 
 ## After release
 

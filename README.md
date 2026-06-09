@@ -1,4 +1,4 @@
-# DeskRealm v0.5.0
+# DeskRealm v0.5.1
 
 **DeskRealm turns Windows virtual desktops into real, separated Desktop realms.**
 
@@ -16,7 +16,7 @@ DeskRealm is currently a personal open-source Windows utility. It is stable enou
 - Folder names synchronized from the names shown in Windows Task View / `Win + Tab`.
 - Existing realm folders are renamed, not duplicated, when the workspace name changes.
 - Per-realm Desktop icon layout save/restore.
-- Automatic icon layout autosave with change detection.
+- Quiet icon layout persistence: layouts are saved on desktop switch, manual save, and exit restore. Background autosave is disabled by default to avoid pointer busy-cursor flicker.
 - Configurable global hotkeys to jump to numbered desktops.
 - Optional startup with Windows from the tray menu.
 - Tray app with status, config, logs, restore, pause/resume, and manual sync actions.
@@ -49,6 +49,7 @@ DeskRealm combines several Windows mechanisms:
 - redirects the current user's Desktop Known Folder to the matching realm folder;
 - requests a Shell refresh so Explorer redraws the Desktop;
 - captures/restores Desktop icon positions through the supported Shell folder view API;
+- avoids background Shell icon polling by default;
 - registers global hotkeys with `RegisterHotKey`;
 - optionally adds/removes an HKCU Run entry for startup.
 
@@ -184,7 +185,7 @@ Example:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "enabled": true,
   "pollIntervalMs": 750,
   "restoreDesktopOnExit": true,
@@ -193,8 +194,8 @@ Example:
   "realmNameMaxLength": 80,
   "iconLayoutPersistenceEnabled": true,
   "iconLayoutSettleDelayMs": 500,
-  "iconLayoutAutoSaveEnabled": true,
-  "iconLayoutAutoSaveIntervalMs": 10000,
+  "iconLayoutAutoSaveEnabled": false,
+  "iconLayoutAutoSaveIntervalMs": 60000,
   "desktopHotkeysEnabled": true,
   "desktopHotkeys": {
     "1": "Win+Shift+W",

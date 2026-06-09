@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If DeskRealm helps your project, please cite it and preserve LICENSE/NOTICE when required by Apache-2.0."
 title: "DeskRealm: virtual desktop realms for Windows"
-version: "0.5.0"
+version: "0.5.1"
 date-released: "2026-06-08"
 type: software
 authors:

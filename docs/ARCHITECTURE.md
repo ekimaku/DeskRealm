@@ -24,7 +24,7 @@ Virtual desktop change detected
 | `RealmConfigService` | Loads/saves `%APPDATA%\DeskRealm\deskrealm.config.json`. |
 | `KnownFolderService` | Gets/sets the current user's Desktop Known Folder path. |
 | `ShellRefreshService` | Requests Shell/Explorer refresh after a Desktop path switch. |
-| `DesktopSwitchService` | Main orchestrator for switching, folder sync, autosave, restore, and hotkey navigation. |
+| `DesktopSwitchService` | Main orchestrator for switching, folder sync, save-on-switch, restore-on-exit, icon restore, and hotkey navigation. |
 | `DesktopIconShellService` | Captures/restores visible Desktop icon positions through Shell folder view APIs. |
 | `IconLayoutWorkerClientService` | Runs icon layout capture/restore in a worker process to isolate COM/native crashes. |
 | `IconLayoutPersistenceService` | Reads/writes icon layout JSON files. |
@@ -54,6 +54,8 @@ Icon positions are persisted per virtual desktop GUID:
 ```
 
 Each visible icon is keyed by a stable PIDL-derived item key. This avoids relying on display order mismatches between different Shell enumeration APIs.
+
+DeskRealm does not poll icon positions periodically by default. It saves layouts on useful lifecycle events: switching away from a realm, manual save, and exit restore. This avoids periodic Shell worker launches and cursor busy-state flicker.
 
 ## Worker isolation
 

@@ -25,15 +25,27 @@ or restart DeskRealm for full reload.
 | `syncRealmNamesWithVirtualDesktopNames` | `true` | Renames/adopts realm folders based on Win+Tab desktop names. |
 | `realmNameMaxLength` | `80` | Maximum sanitized realm folder name length. |
 | `iconLayoutPersistenceEnabled` | `true` | Enables icon layout save/restore. |
-| `iconLayoutSettleDelayMs` | `500` | Delay after Shell refresh before layout restore. |
-| `iconLayoutAutoSaveEnabled` | `true` | Enables periodic layout capture if coordinates changed. |
-| `iconLayoutAutoSaveIntervalMs` | `10000` | Autosave interval in milliseconds. |
+| `iconLayoutSettleDelayMs` | `500` | Delay after Shell refresh before layout restore. Increase slightly if icons are restored too early. |
+| `iconLayoutAutoSaveEnabled` | `false` | Compatibility setting from v0.5.0. Background polling is disabled in v0.5.1 and the recommended value is `false`. |
+| `iconLayoutAutoSaveIntervalMs` | `60000` | Compatibility setting retained for old configs. |
 | `desktopHotkeysEnabled` | `true` | Enables global hotkeys. |
 | `desktopHotkeys` | see below | Maps virtual desktop number to hotkey string. |
 | `hotkeyInitialDelayMs` | `180` | Delay after a global hotkey before sending navigation keystrokes. |
 | `hotkeySwitchStepDelayMs` | `160` | Delay between each Win+Ctrl+Left/Right step. |
 | `hotkeySwitchSettleTimeoutMs` | `3000` | Timeout while waiting for Windows registry state to confirm the target desktop. |
 | `startWithWindows` | `false` | Updated by tray menu when startup is toggled. |
+
+
+## Icon layout save model
+
+Since v0.5.1, DeskRealm does not poll the Desktop icon layout every few seconds by default. Periodic Shell capture can briefly show the Windows busy cursor, so the quiet model is:
+
+- save the active realm layout before switching away;
+- restore the target realm layout after the Desktop folder switch;
+- save the active realm layout before restoring the original Desktop on exit;
+- keep manual tray actions for explicit save/restore.
+
+`iconLayoutAutoSaveEnabled` still exists for config compatibility, but v0.5.1 does not rely on periodic background capture. The recommended value is `false`.
 
 ## Default hotkeys
 

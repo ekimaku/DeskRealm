@@ -1,19 +1,12 @@
 # Changelog
 
-## v0.5.0 - Open-source publication package
+## v0.5.1 — Quiet icon layout hotfix
 
-### Added
-
-- GitHub-ready project metadata: Apache-2.0 license, NOTICE, CITATION.cff, contributor docs, security policy and issue templates.
-- End-user installation documentation.
-- GitHub Actions workflow for Windows build artifacts and tag-based releases.
-- Portable `win-x64` release ZIP packaging.
-- Transparent PowerShell install/uninstall bundle packaging.
-
-### Notes
-
-- The first public release is designed to be source-first and transparent. A signed MSI/EXE installer may be added later if the project grows.
-
+- Disabled background icon layout autosave by default to avoid periodic cursor busy-state flicker.
+- Added config migration from v1 to v2 that disables old periodic autosave settings.
+- Preserved automatic layout saving on desktop switch and before exit restore.
+- Removed post-restore Shell refresh after icon placement.
+- Updated docs to describe the quiet save model.
 
 ## v0.5.0 — Open-source publication package
 
@@ -22,10 +15,10 @@
 - Added `CITATION.cff` for GitHub citation support.
 - Added `AUTHORS.md`, `THIRD_PARTY_NOTICES.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `CODE_OF_CONDUCT.md`.
 - Added GitHub issue/PR templates.
-- Added documentation: architecture, configuration, safety/privacy, attribution, references, and release checklist.
-- Moved previous patch notes to `docs/patch-notes/`.
-- Updated project metadata for open-source packaging.
-- No runtime behavior change from v0.4.1.
+- Added documentation: architecture, configuration, safety/privacy, attribution, references, release checklist, installation and release process.
+- Added GitHub Actions workflow for Windows build artifacts and tag-based releases.
+- Added portable `win-x64` release ZIP packaging.
+- Added transparent PowerShell install/uninstall bundle packaging.
 
 ## v0.4.1 — SendInput hotkey fix
 
