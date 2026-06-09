@@ -66,3 +66,10 @@ Voir `docs/REFERENCES.md` et `THIRD_PARTY_NOTICES.md`.
 - Présence `.gitignore`, `.gitattributes`, issue templates, PR template.
 - Version projet passée à `0.5.1`.
 - Root ZIP stable `DeskRealm/`.
+
+## v0.5.2 — Icon layout contamination guard
+
+Issue: when the user switched virtual desktops outside DeskRealm, the current Windows virtual desktop could change before DeskRealm changed the known Desktop folder. A switch-save at that moment could capture the active shell view and store it under the realm assigned to the old known Desktop path. With identical icons across realms, this looked like DeskRealm always keeping the last moved position.
+
+Correction: icon layout saving is now allowed only when the current Windows virtual desktop ID matches the assignment for the active known Desktop path. If they differ, DeskRealm skips the automatic save or refuses manual save explicitly. This keeps layouts isolated and avoids silent cross-desktop contamination.
+

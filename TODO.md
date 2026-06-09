@@ -16,3 +16,8 @@
 - Optional signed installer.
 - Settings UI for config values.
 - More robust diagnostics panel.
+## v0.5.2 follow-up
+
+- Validate same-icon/different-position layouts across at least two realms.
+- Observe whether manual Windows Task View switching needs a future event-based pre-switch save model.
+

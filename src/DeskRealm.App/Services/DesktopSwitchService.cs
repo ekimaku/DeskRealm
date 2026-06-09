@@ -179,6 +179,7 @@ internal sealed class DesktopSwitchService
                 $"Desktop actif : {knownDesktop}");
         }
 
+        EnsureKnownDesktopAssignmentIsCurrentDesktop(desktopId, realmName, "manual-save");
         EnsureIconLayoutsNotDisabledForSession();
         _iconLayouts.Save(desktopId, realmName, Config.IconLayoutWorkerTimeoutMs);
         _lastIconAutoSaveAt = DateTimeOffset.Now;
@@ -500,6 +501,11 @@ internal sealed class DesktopSwitchService
 
         try
         {
+            if (!IsKnownDesktopAssignmentCurrentDesktop(desktopId, realmName, reason))
+            {
+                return;
+            }
+
             _iconLayouts.SaveIfChanged(desktopId, realmName, Config.IconLayoutWorkerTimeoutMs);
             _lastIconAutoSaveAt = DateTimeOffset.Now;
             _logger.Info($"Icon layout {reason} checked/saved: {realmName} {desktopId:B}");
@@ -508,6 +514,36 @@ internal sealed class DesktopSwitchService
         {
             DisableIconLayoutsForSession(reason, ex);
         }
+    }
+
+    private bool IsKnownDesktopAssignmentCurrentDesktop(Guid assignedDesktopId, string realmName, string reason)
+    {
+        var currentDesktop = _virtualDesktop.GetCurrentVirtualDesktop();
+        if (currentDesktop.Id == assignedDesktopId)
+        {
+            return true;
+        }
+
+        _logger.Info(
+            $"Icon layout {reason} skipped: active known Desktop belongs to realm '{realmName}' {assignedDesktopId:B}, " +
+            $"but current Windows virtual desktop is '{currentDesktop.Name}' {currentDesktop.Id:B}. " +
+            "Skipping save to prevent cross-desktop icon position contamination.");
+        return false;
+    }
+
+    private void EnsureKnownDesktopAssignmentIsCurrentDesktop(Guid assignedDesktopId, string realmName, string reason)
+    {
+        if (IsKnownDesktopAssignmentCurrentDesktop(assignedDesktopId, realmName, reason))
+        {
+            return;
+        }
+
+        var currentDesktop = _virtualDesktop.GetCurrentVirtualDesktop();
+        throw new InvalidOperationException(
+            "Sauvegarde layout icônes refusée : le Desktop connu actif appartient au realm " +
+            $"'{realmName}' {assignedDesktopId:B}, mais le bureau virtuel Windows courant est " +
+            $"'{currentDesktop.Name}' {currentDesktop.Id:B}. " +
+            "Attends que DeskRealm ait terminé le switch, puis utilise Save icon layout now depuis le realm actif.");
     }
 
     private void RestoreIconLayoutForDesktop(VirtualDesktopInfo desktop, string realmPath)

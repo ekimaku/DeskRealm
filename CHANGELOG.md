@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.2 — Icon layout save guard
+
+- Prevented icon layout saves when the active Windows virtual desktop does not match the DeskRealm realm currently assigned as the known Desktop folder.
+- Fixed cross-desktop icon position contamination when identical icons exist on multiple realms with different positions.
+- Kept pre-switch saves for DeskRealm hotkey navigation, where the previous desktop is still active and safe to capture.
+- Added explicit refusal for manual icon layout saves when the known Desktop path and current virtual desktop are out of sync.
+
 ## v0.5.1 — Quiet icon layout hotfix
 
 - Disabled background icon layout autosave by default to avoid periodic cursor busy-state flicker.
