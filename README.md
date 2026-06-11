@@ -6,7 +6,7 @@ Each Windows virtual desktop gets its own Desktop folder, its own icon layout, a
 
 > Example: `Personnal`, `Work`, `Dev`, `Music`, `Gaming` can each display their own Desktop icons and shortcuts.
 
-![DeskRealm demo](https://i.imgur.com/OaUhwjV.gif)
+![DeskRealm demo](https://github.com/user-attachments/assets/02220d35-f28d-44bc-8a66-9394d268cec9)
 
 ## Status
 
