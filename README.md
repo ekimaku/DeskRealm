@@ -6,6 +6,8 @@ Each Windows virtual desktop gets its own Desktop folder, its own icon layout, a
 
 > Example: `Personnal`, `Work`, `Dev`, `Music`, `Gaming` can each display their own Desktop icons and shortcuts.
 
+![DeskRealm demo](https://i.imgur.com/OaUhwjV.gif)
+
 ## Status
 
 DeskRealm is a personal open-source Windows utility. Version `v0.5.7` keeps the validated v0.5.6 icon-layout engine and adds a first-run Desktop import wizard for new installations.
