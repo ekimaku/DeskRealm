@@ -6,6 +6,12 @@ namespace DeskRealm.App.Services;
 
 internal sealed class DesktopIconShellService
 {
+    private const int RestoreBatchSize = 6;
+    private const int RestoreChunkDelayMs = 45;
+    private const int RestoreVerificationDelayMs = 180;
+    private const int RestoreVerificationRetryCount = 3;
+    private const int RestoreVerificationTolerancePx = 4;
+
     private readonly FileLogger _logger;
 
     public DesktopIconShellService(FileLogger logger) => _logger = logger;
@@ -109,8 +115,7 @@ internal sealed class DesktopIconShellService
             }
 
             var missing = new List<string>();
-            var pidlsToPosition = new List<IntPtr>();
-            var pointsToPosition = new List<NativePoint>();
+            var targets = new List<RestoreTarget>();
 
             foreach (var saved in savedPositions)
             {
@@ -120,19 +125,19 @@ internal sealed class DesktopIconShellService
                     continue;
                 }
 
-                pidlsToPosition.Add(pidl);
-                pointsToPosition.Add(new NativePoint(saved.X, saved.Y));
+                targets.Add(new RestoreTarget(
+                    saved.ItemKey,
+                    string.IsNullOrWhiteSpace(saved.DisplayName) ? saved.ItemKey : saved.DisplayName,
+                    pidl,
+                    new NativePoint(saved.X, saved.Y)));
             }
 
-            var restored = pidlsToPosition.Count;
-            if (restored > 0)
+            var attempted = targets.Count;
+            var unresolved = new List<RestoreTarget>();
+            if (attempted > 0)
             {
-                var hr = view.SelectAndPositionItems(
-                    (uint)restored,
-                    pidlsToPosition.ToArray(),
-                    pointsToPosition.ToArray(),
-                    ShellConstants.SVSI_POSITIONITEM);
-                ThrowIfFailed(hr, $"IFolderView.SelectAndPositionItems(batch, {restored} icon(s))");
+                ApplyPositionsInChunks(view, targets, "initial");
+                unresolved = VerifyAndRetryPositions(view, targets);
             }
 
             if (missing.Count > 0)
@@ -140,13 +145,23 @@ internal sealed class DesktopIconShellService
                 _logger.Warn($"Icon layout restore partial: {missing.Count} saved icons not found in current desktop view: {string.Join(", ", missing.Take(12))}{(missing.Count > 12 ? ", ..." : string.Empty)}");
             }
 
-            if (restored == 0)
+            if (attempted == 0)
             {
                 _logger.Warn("Icon layout restore applied to 0 icon. Layout file kept, no fallback layout used.");
             }
 
-            _logger.Info($"Icon layout restore phase: batch-restored {restored}/{savedPositions.Count} positions.");
-            return restored;
+            if (unresolved.Count > 0)
+            {
+                _logger.Warn(
+                    $"Icon layout restore verification still has {unresolved.Count} icon(s) not at target position after retries: " +
+                    $"{string.Join(", ", unresolved.Select(t => t.DisplayName).Take(12))}{(unresolved.Count > 12 ? ", ..." : string.Empty)}");
+            }
+
+            var verifiedRestored = Math.Max(0, attempted - unresolved.Count);
+            _logger.Info(
+                $"Icon layout restore phase: verified {verifiedRestored}/{savedPositions.Count} positions " +
+                $"(attempted={attempted}, missing={missing.Count}, unresolved={unresolved.Count}).");
+            return verifiedRestored;
         }
         finally
         {
@@ -157,6 +172,77 @@ internal sealed class DesktopIconShellService
 
             ReleaseComObject(view);
         }
+    }
+
+    private void ApplyPositionsInChunks(IFolderView view, IReadOnlyList<RestoreTarget> targets, string phase)
+    {
+        foreach (var chunk in targets.Chunk(RestoreBatchSize))
+        {
+            var chunkTargets = chunk.ToArray();
+            var hr = view.SelectAndPositionItems(
+                (uint)chunkTargets.Length,
+                chunkTargets.Select(t => t.Pidl).ToArray(),
+                chunkTargets.Select(t => t.Target).ToArray(),
+                ShellConstants.SVSI_POSITIONITEM | ShellConstants.SVSI_NOTAKEFOCUS);
+            ThrowIfFailed(hr, $"IFolderView.SelectAndPositionItems({phase}, {chunkTargets.Length} icon(s))");
+
+            if (RestoreChunkDelayMs > 0 && chunkTargets.Length == RestoreBatchSize)
+            {
+                Thread.Sleep(RestoreChunkDelayMs);
+            }
+        }
+    }
+
+    private List<RestoreTarget> VerifyAndRetryPositions(IFolderView view, IReadOnlyList<RestoreTarget> targets)
+    {
+        var unresolved = new List<RestoreTarget>();
+        IReadOnlyList<RestoreTarget> pending = targets;
+
+        for (var attempt = 1; attempt <= RestoreVerificationRetryCount; attempt++)
+        {
+            if (RestoreVerificationDelayMs > 0)
+            {
+                Thread.Sleep(RestoreVerificationDelayMs);
+            }
+
+            unresolved = FindTargetsNotAtPosition(view, pending);
+            if (unresolved.Count == 0)
+            {
+                _logger.Info($"Icon layout restore verification passed on attempt {attempt}/{RestoreVerificationRetryCount}.");
+                return unresolved;
+            }
+
+            _logger.Warn(
+                $"Icon layout restore verification retry {attempt}/{RestoreVerificationRetryCount}: " +
+                $"{unresolved.Count} icon(s) not yet at target position. Re-applying only unresolved icons.");
+            ApplyPositionsInChunks(view, unresolved, $"verification-retry-{attempt}");
+            pending = unresolved;
+        }
+
+        if (RestoreVerificationDelayMs > 0)
+        {
+            Thread.Sleep(RestoreVerificationDelayMs);
+        }
+
+        return FindTargetsNotAtPosition(view, targets);
+    }
+
+    private static List<RestoreTarget> FindTargetsNotAtPosition(IFolderView view, IReadOnlyList<RestoreTarget> targets)
+    {
+        var unresolved = new List<RestoreTarget>();
+        foreach (var target in targets)
+        {
+            var hr = view.GetItemPosition(target.Pidl, out var current);
+            ThrowIfFailed(hr, $"IFolderView.GetItemPosition(verify '{target.DisplayName}')");
+
+            if (Math.Abs(current.X - target.Target.X) > RestoreVerificationTolerancePx ||
+                Math.Abs(current.Y - target.Target.Y) > RestoreVerificationTolerancePx)
+            {
+                unresolved.Add(target);
+            }
+        }
+
+        return unresolved;
     }
 
     private static int GetFolderViewItemCount(IFolderView view)
@@ -324,6 +410,8 @@ internal sealed class DesktopIconShellService
         }
     }
 
+    private sealed record RestoreTarget(string ItemKey, string DisplayName, IntPtr Pidl, NativePoint Target);
+
     private static class ShellConstants
     {
         public const int CSIDL_DESKTOP = 0;
@@ -331,6 +419,7 @@ internal sealed class DesktopIconShellService
         public const int SWFO_NEEDDISPATCH = 1;
         public const uint SVGIO_ALLVIEW = 0x00000002;
         public const uint SVSI_POSITIONITEM = 0x00000080;
+        public const uint SVSI_NOTAKEFOCUS = 0x40000000;
     }
 
     private static class ShellGuids

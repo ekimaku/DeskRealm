@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.5 — Verified chunked icon placement
+
+- Applies icon positions in smaller chunks instead of one large Shell batch.
+- Verifies actual icon positions after restore and retries only icons that did not move.
+- Keeps `SVSI_NOTAKEFOCUS` during placement to reduce Shell focus side effects.
+- Adds logs for unresolved icons after restore verification so persistent identity issues can be diagnosed without silent fallback.
+
 ## v0.5.4 — Deferred switch restore and batched icon placement
 
 - Deferred icon layout restore after a desktop switch so Explorer has time to finish showing the target realm before DeskRealm moves icons.
