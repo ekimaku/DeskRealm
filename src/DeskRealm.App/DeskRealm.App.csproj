@@ -6,9 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>DeskRealm.App</AssemblyName>
     <RootNamespace>DeskRealm.App</RootNamespace>
-    <Version>0.5.2</Version>
+    <Version>0.5.3</Version>
     <Authors>Ayahua</Authors>
     <Company>Ayahua</Company>
     <Copyright>Copyright (c) 2026 Ayahua</Copyright>

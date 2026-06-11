@@ -28,6 +28,8 @@ or restart DeskRealm for full reload.
 | `iconLayoutSettleDelayMs` | `500` | Delay after Shell refresh before layout restore. Increase slightly if icons are restored too early. |
 | `iconLayoutAutoSaveEnabled` | `false` | Compatibility setting from v0.5.0. Background polling is disabled in v0.5.1 and the recommended value is `false`. |
 | `iconLayoutAutoSaveIntervalMs` | `60000` | Compatibility setting retained for old configs. |
+| `iconLayoutDisplayTopologyGuardEnabled` | `true` | Prevents saves while monitor/resolution/DPI topology changes are settling. |
+| `iconLayoutDisplayTopologySettleDelayMs` | `1200` | Delay before restoring after a display topology change. |
 | `desktopHotkeysEnabled` | `true` | Enables global hotkeys. |
 | `desktopHotkeys` | see below | Maps virtual desktop number to hotkey string. |
 | `hotkeyInitialDelayMs` | `180` | Delay after a global hotkey before sending navigation keystrokes. |
@@ -45,7 +47,9 @@ Since v0.5.1, DeskRealm does not poll the Desktop icon layout every few seconds 
 - save the active realm layout before restoring the original Desktop on exit;
 - keep manual tray actions for explicit save/restore.
 
-`iconLayoutAutoSaveEnabled` still exists for config compatibility, but v0.5.1 does not rely on periodic background capture. The recommended value is `false`.
+`iconLayoutAutoSaveEnabled` still exists for config compatibility, but v0.5.1+ does not rely on periodic background capture. The recommended value is `false`.
+
+Since v0.5.3, icon layouts are also separated by display topology. The topology includes active monitors, virtual desktop bounds, resolution, orientation and effective DPI / scale. When Windows changes display topology, DeskRealm temporarily refuses icon layout saves, waits for the topology to settle, then restores the active realm layout before allowing future saves. This prevents a one-monitor, game-resolution, or scale-changed layout from overwriting the normal layout.
 
 ## Default hotkeys
 

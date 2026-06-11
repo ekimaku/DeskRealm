@@ -15,6 +15,9 @@ internal sealed class DesktopSwitchService
     private string _lastMessage = "Initialisé.";
     private DateTimeOffset _lastSwitchAt = DateTimeOffset.MinValue;
     private DateTimeOffset _lastIconAutoSaveAt = DateTimeOffset.MinValue;
+    private string? _lastDisplayTopologyKey;
+    private DateTimeOffset _lastDisplayTopologyChangedAt = DateTimeOffset.MinValue;
+    private bool _displayTopologyRestorePending;
     private bool _iconLayoutsDisabledForSession;
     private string? _iconLayoutsDisabledReason;
 
@@ -42,6 +45,14 @@ internal sealed class DesktopSwitchService
     {
         var currentDesktopPath = _knownFolder.GetDesktopPath();
         _config = _configService.LoadOrCreate(currentDesktopPath);
+
+        if (Config.IconLayoutDisplayTopologyGuardEnabled)
+        {
+            var topology = DisplayTopologyService.Capture();
+            _lastDisplayTopologyKey = topology.Key;
+            _lastDisplayTopologyChangedAt = DateTimeOffset.Now;
+            _logger.Info($"Initial display topology captured: {topology.Key} ({topology.Screens.Count} screen(s), virtual={topology.VirtualBoundsWidth}x{topology.VirtualBoundsHeight}).");
+        }
 
         if (Config.RejectOneDriveDesktop && ContainsOneDriveSegment(Config.OriginalDesktopPath!))
         {
@@ -91,11 +102,13 @@ internal sealed class DesktopSwitchService
         var current = _virtualDesktop.GetCurrentVirtualDesktop();
         var realmPath = ResolveRealmPath(current, createIfMissing: true);
         var currentKnownDesktop = _knownFolder.GetDesktopPath();
+        TrackDisplayTopology("tick");
 
         if (_lastDesktopId.HasValue &&
             _lastDesktopId.Value == current.Id &&
             string.Equals(currentKnownDesktop, realmPath, StringComparison.OrdinalIgnoreCase))
         {
+            RestoreIconLayoutAfterDisplayTopologySettled(current, realmPath);
             return;
         }
 
@@ -480,6 +493,81 @@ internal sealed class DesktopSwitchService
         _shellRefresh.RefreshDesktop(original);
     }
 
+    private void TrackDisplayTopology(string reason)
+    {
+        if (!Config.IconLayoutDisplayTopologyGuardEnabled || !Config.IconLayoutPersistenceEnabled)
+        {
+            return;
+        }
+
+        var topology = DisplayTopologyService.Capture();
+        if (string.IsNullOrWhiteSpace(_lastDisplayTopologyKey))
+        {
+            _lastDisplayTopologyKey = topology.Key;
+            _lastDisplayTopologyChangedAt = DateTimeOffset.Now;
+            _logger.Info($"Display topology baseline established ({reason}): {topology.Key}.");
+            return;
+        }
+
+        if (string.Equals(_lastDisplayTopologyKey, topology.Key, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _lastDisplayTopologyKey = topology.Key;
+        _lastDisplayTopologyChangedAt = DateTimeOffset.Now;
+        _displayTopologyRestorePending = true;
+        _lastMessage = "Topologie écran modifiée : restauration layout icônes en attente.";
+        _logger.Warn(
+            $"Display topology changed ({reason}): {topology.Key} " +
+            $"({topology.Screens.Count} screen(s), virtual={topology.VirtualBoundsWidth}x{topology.VirtualBoundsHeight}). " +
+            "Icon layout saves are guarded until settle, then current realm layout will be restored.");
+    }
+
+    private bool IsDisplayTopologySaveGuardActive(string reason)
+    {
+        if (!Config.IconLayoutDisplayTopologyGuardEnabled || !_displayTopologyRestorePending)
+        {
+            return false;
+        }
+
+        var elapsedMs = (DateTimeOffset.Now - _lastDisplayTopologyChangedAt).TotalMilliseconds;
+        if (elapsedMs < Config.IconLayoutDisplayTopologySettleDelayMs)
+        {
+            _logger.Info(
+                $"Icon layout {reason} skipped: display topology changed {elapsedMs:0} ms ago; " +
+                $"waiting {Config.IconLayoutDisplayTopologySettleDelayMs} ms before accepting saves.");
+            return true;
+        }
+
+        if (_displayTopologyRestorePending)
+        {
+            _logger.Info($"Icon layout {reason} skipped: display topology restore is pending. Restore first to avoid saving Windows-compacted icon positions.");
+            return true;
+        }
+
+        return false;
+    }
+
+    private void RestoreIconLayoutAfterDisplayTopologySettled(VirtualDesktopInfo current, string realmPath)
+    {
+        if (!Config.IconLayoutDisplayTopologyGuardEnabled || !_displayTopologyRestorePending)
+        {
+            return;
+        }
+
+        var elapsedMs = (DateTimeOffset.Now - _lastDisplayTopologyChangedAt).TotalMilliseconds;
+        if (elapsedMs < Config.IconLayoutDisplayTopologySettleDelayMs)
+        {
+            return;
+        }
+
+        _logger.Info($"Display topology settled after {elapsedMs:0} ms. Restoring current realm icon layout before any future save.");
+        RestoreIconLayoutForDesktop(current, realmPath);
+        _displayTopologyRestorePending = false;
+        _lastMessage = "Topologie écran stabilisée : layout icônes restauré.";
+    }
+
     private void SaveIconLayoutForKnownDesktopIfRealm(string knownDesktopPath, string reason = "switch-save")
     {
         if (!Config.IconLayoutPersistenceEnabled)
@@ -490,6 +578,12 @@ internal sealed class DesktopSwitchService
         if (_iconLayoutsDisabledForSession)
         {
             _logger.Warn($"Icon layout {reason} skipped: feature disabled for this session. Reason: {_iconLayoutsDisabledReason}");
+            return;
+        }
+
+        TrackDisplayTopology($"{reason}/save-guard");
+        if (IsDisplayTopologySaveGuardActive(reason))
+        {
             return;
         }
 
@@ -568,6 +662,7 @@ internal sealed class DesktopSwitchService
         try
         {
             _iconLayouts.Restore(desktop.Id, realmName, Config.IconLayoutWorkerTimeoutMs);
+            _displayTopologyRestorePending = false;
         }
         catch (Exception ex)
         {

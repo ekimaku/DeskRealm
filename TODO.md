@@ -11,6 +11,17 @@
 - [x] Update docs/release notes/changelog.
 - [x] Run static smoke test in sandbox.
 
+## v0.5.3 display topology aware icon layouts
+
+- [x] Audit multi-screen / resolution / scale contamination risk.
+- [x] Add display topology snapshot with screens, bounds, orientation and effective DPI.
+- [x] Store multiple layout variants per virtual desktop.
+- [x] Add screen-relative icon metadata for best-effort restore.
+- [x] Guard saves while display topology changes are settling.
+- [x] Restore current realm after topology settles.
+- [x] Update changelog, release notes, patch notes and configuration docs.
+- [x] Run static smoke test in sandbox.
+
 ## Future ideas
 
 - Optional signed installer.

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.3 — Display topology aware icon layouts
+
+- Added display topology variants for icon layouts, keyed by active monitor set, virtual bounds, resolution, orientation and effective DPI / scale.
+- Added per-icon screen-relative metadata so best-effort restores can adapt positions when resolution or scale changes.
+- Added a display topology save guard that skips saves while monitor/resolution/DPI changes are settling, preventing Windows-compacted positions from contaminating a realm.
+- Added automatic restore of the current realm after a display topology change settles.
+- Enabled PerMonitorV2 DPI awareness so DeskRealm can see per-monitor scale values for layout keys.
+
 ## v0.5.2 — Icon layout save guard
 
 - Prevented icon layout saves when the active Windows virtual desktop does not match the DeskRealm realm currently assigned as the known Desktop folder.

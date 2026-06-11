@@ -66,6 +66,18 @@ internal sealed class RealmConfigService
             config.Version = 2;
         }
 
+        if (config.Version < 3)
+        {
+            config.IconLayoutDisplayTopologyGuardEnabled = true;
+            if (config.IconLayoutDisplayTopologySettleDelayMs < 1200)
+            {
+                config.IconLayoutDisplayTopologySettleDelayMs = 1200;
+            }
+
+            config.Version = 3;
+            _logger.Warn("Migration config v3 : garde topologie écran/DPI activée pour éviter les sauvegardes contaminées multi-écran/résolution/scale.");
+        }
+
         if (config.PollIntervalMs < 250)
         {
             throw new InvalidOperationException("pollIntervalMs est trop bas. Valeur minimale stricte : 250 ms.");
@@ -89,6 +101,11 @@ internal sealed class RealmConfigService
         if (config.IconLayoutWorkerTimeoutMs is < 1000 or > 60000)
         {
             throw new InvalidOperationException("iconLayoutWorkerTimeoutMs invalide. Valeur stricte autorisée : 1000 à 60000 ms.");
+        }
+
+        if (config.IconLayoutDisplayTopologySettleDelayMs is < 0 or > 10000)
+        {
+            throw new InvalidOperationException("iconLayoutDisplayTopologySettleDelayMs invalide. Valeur stricte autorisée : 0 à 10000 ms.");
         }
 
         if (config.IconLayoutAutoSaveIntervalMs is < 0 or > 300000)
