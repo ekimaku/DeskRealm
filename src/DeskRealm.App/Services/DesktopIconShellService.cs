@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace DeskRealm.App.Services;
 
@@ -20,9 +21,11 @@ internal sealed class DesktopIconShellService
     {
         _logger.Info("Icon layout capture phase: acquire desktop IFolderView.");
         var view = GetDesktopFolderView();
+        IShellFolder? folder = null;
 
         try
         {
+            folder = GetShellFolder(view);
             var count = GetFolderViewItemCount(view);
             _logger.Info($"Icon layout capture phase: visible item count = {count}.");
 
@@ -41,14 +44,23 @@ internal sealed class DesktopIconShellService
                     }
 
                     var itemKey = BuildPidlItemKey(pidl);
+                    var shellDisplayName = TryGetShellDisplayName(folder, pidl, ShellConstants.SHGDN_INFOLDER);
+                    var shellParsingName = TryGetShellDisplayName(folder, pidl, ShellConstants.SHGDN_FORPARSING);
+                    var displayName = !string.IsNullOrWhiteSpace(shellDisplayName)
+                        ? shellDisplayName
+                        : BuildTechnicalDisplayName(index, itemKey);
+                    var identityKeys = BuildIdentityKeys(itemKey, shellDisplayName, shellParsingName);
 
                     hr = view.GetItemPosition(pidl, out var point);
-                    ThrowIfFailed(hr, $"IFolderView.GetItemPosition('{itemKey}')");
+                    ThrowIfFailed(hr, $"IFolderView.GetItemPosition('{displayName}')");
 
                     positions.Add(new DesktopIconPosition
                     {
                         ItemKey = itemKey,
-                        DisplayName = BuildTechnicalDisplayName(index, itemKey),
+                        DisplayName = displayName,
+                        ShellDisplayName = shellDisplayName,
+                        ShellParsingName = shellParsingName,
+                        IdentityKeys = identityKeys,
                         X = point.X,
                         Y = point.Y
                     });
@@ -68,6 +80,7 @@ internal sealed class DesktopIconShellService
         }
         finally
         {
+            ReleaseComObject(folder);
             ReleaseComObject(view);
         }
     }
@@ -84,14 +97,17 @@ internal sealed class DesktopIconShellService
 
         _logger.Info("Icon layout restore phase: acquire desktop IFolderView.");
         var view = GetDesktopFolderView();
+        IShellFolder? folder = null;
         var pidlsToFree = new List<IntPtr>();
 
         try
         {
+            folder = GetShellFolder(view);
             var count = GetFolderViewItemCount(view);
             _logger.Info($"Icon layout restore phase: visible item count = {count}.");
 
-            var currentItems = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
+            var currentItems = new List<CurrentDesktopItem>();
+            var currentItemsByExactKey = new Dictionary<string, CurrentDesktopItem>(StringComparer.OrdinalIgnoreCase);
             for (var index = 0; index < count; index++)
             {
                 var hr = view.Item(index, out var pidl);
@@ -102,7 +118,7 @@ internal sealed class DesktopIconShellService
                 }
 
                 var itemKey = BuildPidlItemKey(pidl);
-                if (currentItems.ContainsKey(itemKey))
+                if (currentItemsByExactKey.ContainsKey(itemKey))
                 {
                     Marshal.FreeCoTaskMem(pidl);
                     throw new InvalidOperationException(
@@ -110,25 +126,68 @@ internal sealed class DesktopIconShellService
                         "DeskRealm refuse d'appliquer un layout ambigu.");
                 }
 
-                currentItems.Add(itemKey, pidl);
+                var shellDisplayName = TryGetShellDisplayName(folder, pidl, ShellConstants.SHGDN_INFOLDER);
+                var shellParsingName = TryGetShellDisplayName(folder, pidl, ShellConstants.SHGDN_FORPARSING);
+                var displayName = !string.IsNullOrWhiteSpace(shellDisplayName)
+                    ? shellDisplayName
+                    : BuildTechnicalDisplayName(index, itemKey);
+                var identityKeys = BuildIdentityKeys(itemKey, shellDisplayName, shellParsingName);
+
+                hr = view.GetItemPosition(pidl, out var currentPosition);
+                ThrowIfFailed(hr, $"IFolderView.GetItemPosition(current '{displayName}')");
+
+                var currentItem = new CurrentDesktopItem(
+                    itemKey,
+                    displayName,
+                    shellDisplayName,
+                    shellParsingName,
+                    identityKeys,
+                    pidl,
+                    currentPosition);
+                currentItems.Add(currentItem);
+                currentItemsByExactKey.Add(itemKey, currentItem);
                 pidlsToFree.Add(pidl);
             }
 
             var missing = new List<string>();
             var targets = new List<RestoreTarget>();
+            var usedCurrentItemKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var fallbackMatches = 0;
 
             foreach (var saved in savedPositions)
             {
-                if (!currentItems.TryGetValue(saved.ItemKey, out var pidl))
+                var savedDisplayName = BestDisplayName(saved);
+                CurrentDesktopItem? matched = null;
+                var exactMatch = currentItemsByExactKey.TryGetValue(saved.ItemKey, out var exactItem) &&
+                    !usedCurrentItemKeys.Contains(exactItem.ItemKey);
+
+                if (exactMatch)
                 {
-                    missing.Add(string.IsNullOrWhiteSpace(saved.DisplayName) ? saved.ItemKey : saved.DisplayName);
+                    matched = exactItem;
+                }
+                else
+                {
+                    matched = FindBestFallbackMatch(saved, currentItems, usedCurrentItemKeys);
+                    if (matched is not null)
+                    {
+                        fallbackMatches++;
+                        _logger.Info(
+                            $"Icon layout restore identity fallback: saved '{savedDisplayName}' [{ShortKey(saved.ItemKey)}] " +
+                            $"matched current '{matched.DisplayName}' [{ShortKey(matched.ItemKey)}].");
+                    }
+                }
+
+                if (matched is null)
+                {
+                    missing.Add(savedDisplayName);
                     continue;
                 }
 
+                usedCurrentItemKeys.Add(matched.ItemKey);
                 targets.Add(new RestoreTarget(
                     saved.ItemKey,
-                    string.IsNullOrWhiteSpace(saved.DisplayName) ? saved.ItemKey : saved.DisplayName,
-                    pidl,
+                    savedDisplayName,
+                    matched.Pidl,
                     new NativePoint(saved.X, saved.Y)));
             }
 
@@ -143,6 +202,11 @@ internal sealed class DesktopIconShellService
             if (missing.Count > 0)
             {
                 _logger.Warn($"Icon layout restore partial: {missing.Count} saved icons not found in current desktop view: {string.Join(", ", missing.Take(12))}{(missing.Count > 12 ? ", ..." : string.Empty)}");
+            }
+
+            if (fallbackMatches > 0)
+            {
+                _logger.Info($"Icon layout restore phase: recovered {fallbackMatches} icon(s) through secondary Shell identity matching.");
             }
 
             if (attempted == 0)
@@ -160,7 +224,7 @@ internal sealed class DesktopIconShellService
             var verifiedRestored = Math.Max(0, attempted - unresolved.Count);
             _logger.Info(
                 $"Icon layout restore phase: verified {verifiedRestored}/{savedPositions.Count} positions " +
-                $"(attempted={attempted}, missing={missing.Count}, unresolved={unresolved.Count}).");
+                $"(attempted={attempted}, missing={missing.Count}, fallbackMatches={fallbackMatches}, unresolved={unresolved.Count}).");
             return verifiedRestored;
         }
         finally
@@ -170,7 +234,177 @@ internal sealed class DesktopIconShellService
                 Marshal.FreeCoTaskMem(pidl);
             }
 
+            ReleaseComObject(folder);
             ReleaseComObject(view);
+        }
+    }
+
+    private static CurrentDesktopItem? FindBestFallbackMatch(
+        DesktopIconPosition saved,
+        IReadOnlyList<CurrentDesktopItem> currentItems,
+        HashSet<string> usedCurrentItemKeys)
+    {
+        var savedKeys = EffectiveIdentityKeys(saved).Where(k => !string.Equals(k, saved.ItemKey, StringComparison.OrdinalIgnoreCase));
+        foreach (var savedKey in savedKeys)
+        {
+            var candidates = currentItems
+                .Where(current =>
+                    !usedCurrentItemKeys.Contains(current.ItemKey) &&
+                    current.IdentityKeys.Any(k => string.Equals(k, savedKey, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(current => DistanceSquared(current.CurrentPosition.X, current.CurrentPosition.Y, saved.X, saved.Y))
+                .ToList();
+
+            if (candidates.Count > 0)
+            {
+                return candidates[0];
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<string> EffectiveIdentityKeys(DesktopIconPosition icon)
+    {
+        var keys = new List<string>();
+        AddIdentityKey(keys, icon.ItemKey);
+        foreach (var key in icon.IdentityKeys)
+        {
+            AddIdentityKey(keys, key);
+        }
+
+        foreach (var key in BuildIdentityKeys(icon.ItemKey, icon.ShellDisplayName, icon.ShellParsingName))
+        {
+            AddIdentityKey(keys, key);
+        }
+
+        // v0.5.5 and older layouts only stored DisplayName. Use it as a last-resort human-name fallback,
+        // but only when it does not look like the old technical placeholder.
+        if (!string.IsNullOrWhiteSpace(icon.DisplayName) &&
+            !icon.DisplayName.StartsWith("Desktop item #", StringComparison.OrdinalIgnoreCase))
+        {
+            AddIdentityKey(keys, "name:" + NormalizeIdentityValue(icon.DisplayName));
+        }
+
+        return keys;
+    }
+
+    private static List<string> BuildIdentityKeys(string itemKey, string shellDisplayName, string shellParsingName)
+    {
+        var keys = new List<string>();
+        AddIdentityKey(keys, itemKey);
+
+        var normalizedDisplayName = NormalizeIdentityValue(shellDisplayName);
+        if (!string.IsNullOrWhiteSpace(normalizedDisplayName))
+        {
+            AddIdentityKey(keys, "name:" + normalizedDisplayName);
+            AddIdentityKey(keys, "stem:" + NormalizeIdentityValue(Path.GetFileNameWithoutExtension(normalizedDisplayName)));
+        }
+
+        var normalizedParsingName = NormalizeIdentityValue(shellParsingName);
+        if (!string.IsNullOrWhiteSpace(normalizedParsingName))
+        {
+            AddIdentityKey(keys, "parse:" + normalizedParsingName);
+
+            var fileName = Path.GetFileName(normalizedParsingName);
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                AddIdentityKey(keys, "file:" + NormalizeIdentityValue(fileName));
+                AddIdentityKey(keys, "stem:" + NormalizeIdentityValue(Path.GetFileNameWithoutExtension(fileName)));
+            }
+        }
+
+        return keys;
+    }
+
+    private static void AddIdentityKey(List<string> keys, string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        if (!keys.Any(existing => string.Equals(existing, key, StringComparison.OrdinalIgnoreCase)))
+        {
+            keys.Add(key);
+        }
+    }
+
+    private static string NormalizeIdentityValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return value
+            .Trim()
+            .Replace('\\', '/')
+            .Replace('\u00a0', ' ')
+            .ToLowerInvariant();
+    }
+
+    private static long DistanceSquared(int x1, int y1, int x2, int y2)
+    {
+        var dx = x1 - x2;
+        var dy = y1 - y2;
+        return (long)dx * dx + (long)dy * dy;
+    }
+
+    private static string BestDisplayName(DesktopIconPosition icon)
+    {
+        if (!string.IsNullOrWhiteSpace(icon.ShellDisplayName))
+        {
+            return icon.ShellDisplayName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(icon.DisplayName))
+        {
+            return icon.DisplayName;
+        }
+
+        return icon.ItemKey;
+    }
+
+    private static string ShortKey(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return "no-key";
+        }
+
+        return key.Length <= 28 ? key : key[..28] + "…";
+    }
+
+    private static IShellFolder GetShellFolder(IFolderView view)
+    {
+        var shellFolderId = ShellGuids.IID_IShellFolder;
+        var hr = view.GetFolder(ref shellFolderId, out var folderObject);
+        ThrowIfFailed(hr, "IFolderView.GetFolder(IShellFolder)");
+        return (IShellFolder)folderObject;
+    }
+
+    private static string TryGetShellDisplayName(IShellFolder folder, IntPtr pidl, uint flags)
+    {
+        try
+        {
+            var hr = folder.GetDisplayNameOf(pidl, flags, out var strRet);
+            if (hr < 0)
+            {
+                return string.Empty;
+            }
+
+            var builder = new StringBuilder(1024);
+            hr = StrRetToBuf(ref strRet, pidl, builder, (uint)builder.Capacity);
+            if (hr < 0)
+            {
+                return string.Empty;
+            }
+
+            return builder.ToString();
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 
@@ -412,6 +646,18 @@ internal sealed class DesktopIconShellService
 
     private sealed record RestoreTarget(string ItemKey, string DisplayName, IntPtr Pidl, NativePoint Target);
 
+    private sealed record CurrentDesktopItem(
+        string ItemKey,
+        string DisplayName,
+        string ShellDisplayName,
+        string ShellParsingName,
+        IReadOnlyList<string> IdentityKeys,
+        IntPtr Pidl,
+        NativePoint CurrentPosition);
+
+    [DllImport("Shlwapi.dll", CharSet = CharSet.Unicode)]
+    private static extern int StrRetToBuf(ref ShellStrRet pstr, IntPtr pidl, StringBuilder pszBuf, uint cchBuf);
+
     private static class ShellConstants
     {
         public const int CSIDL_DESKTOP = 0;
@@ -420,6 +666,8 @@ internal sealed class DesktopIconShellService
         public const uint SVGIO_ALLVIEW = 0x00000002;
         public const uint SVSI_POSITIONITEM = 0x00000080;
         public const uint SVSI_NOTAKEFOCUS = 0x40000000;
+        public const uint SHGDN_INFOLDER = 0x00000001;
+        public const uint SHGDN_FORPARSING = 0x00008000;
     }
 
     private static class ShellGuids
@@ -427,6 +675,16 @@ internal sealed class DesktopIconShellService
         public static readonly Guid CLSID_ShellWindows = new("9BA05972-F6A8-11CF-A442-00A0C90A8F39");
         public static readonly Guid SID_STopLevelBrowser = new("4C96BE40-915C-11CF-99D3-00AA004AE837");
         public static readonly Guid IID_IShellBrowser = new("000214E2-0000-0000-C000-000000000046");
+        public static readonly Guid IID_IShellFolder = new("000214E6-0000-0000-C000-000000000046");
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 520)]
+    private struct ShellStrRet
+    {
+        [FieldOffset(0)] public uint UType;
+        [FieldOffset(4)] public IntPtr POleStr;
+        [FieldOffset(4)] public IntPtr PStr;
+        [FieldOffset(4)] public uint UOffset;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -507,6 +765,48 @@ internal sealed class DesktopIconShellService
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IShellView
     {
+    }
+
+    [ComImport]
+    [Guid("000214E6-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellFolder
+    {
+        [PreserveSig]
+        int ParseDisplayName(
+            IntPtr hwnd,
+            IntPtr pbc,
+            [MarshalAs(UnmanagedType.LPWStr)] string pszDisplayName,
+            out uint pchEaten,
+            out IntPtr ppidl,
+            ref uint pdwAttributes);
+
+        [PreserveSig]
+        int EnumObjects(IntPtr hwnd, uint grfFlags, out IntPtr ppenumIDList);
+
+        [PreserveSig]
+        int BindToObject(IntPtr pidl, IntPtr pbc, ref Guid riid, out IntPtr ppv);
+
+        [PreserveSig]
+        int BindToStorage(IntPtr pidl, IntPtr pbc, ref Guid riid, out IntPtr ppv);
+
+        [PreserveSig]
+        int CompareIDs(IntPtr lParam, IntPtr pidl1, IntPtr pidl2);
+
+        [PreserveSig]
+        int CreateViewObject(IntPtr hwndOwner, ref Guid riid, out IntPtr ppv);
+
+        [PreserveSig]
+        int GetAttributesOf(uint cidl, IntPtr[] apidl, ref uint rgfInOut);
+
+        [PreserveSig]
+        int GetUIObjectOf(IntPtr hwndOwner, uint cidl, IntPtr[] apidl, ref Guid riid, IntPtr rgfReserved, out IntPtr ppv);
+
+        [PreserveSig]
+        int GetDisplayNameOf(IntPtr pidl, uint uFlags, out ShellStrRet pName);
+
+        [PreserveSig]
+        int SetNameOf(IntPtr hwnd, IntPtr pidl, [MarshalAs(UnmanagedType.LPWStr)] string pszName, uint uFlags, out IntPtr ppidlOut);
     }
 
     [ComImport]

@@ -216,6 +216,9 @@ internal sealed class IconLayoutPersistenceService
         {
             ItemKey = icon.ItemKey,
             DisplayName = icon.DisplayName,
+            ShellDisplayName = icon.ShellDisplayName,
+            ShellParsingName = icon.ShellParsingName,
+            IdentityKeys = icon.IdentityKeys.ToList(),
             X = icon.X,
             Y = icon.Y,
             ScreenDeviceName = screen.DeviceName,
@@ -267,6 +270,9 @@ internal sealed class IconLayoutPersistenceService
         {
             ItemKey = icon.ItemKey,
             DisplayName = icon.DisplayName,
+            ShellDisplayName = icon.ShellDisplayName,
+            ShellParsingName = icon.ShellParsingName,
+            IdentityKeys = icon.IdentityKeys.ToList(),
             X = x,
             Y = y,
             ScreenDeviceName = targetScreen.DeviceName,

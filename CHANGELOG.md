@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.6 — Shell identity fallback for repeated icons
+
+- Stores Shell display/parsing identity metadata for desktop icons in addition to the PIDL-derived key.
+- Restores icons through exact PIDL first, then falls back to secondary Shell identity matching when Explorer exposes the same shortcut with a different PIDL after a realm/display transition.
+- Adds explicit fallback-match logs so icons like browser shortcuts can be diagnosed by human-readable names instead of only `Desktop item #...` placeholders.
+- Keeps the existing anti-contamination and verified restore logic from v0.5.4/v0.5.5.
+
 ## v0.5.5 — Verified chunked icon placement
 
 - Applies icon positions in smaller chunks instead of one large Shell batch.

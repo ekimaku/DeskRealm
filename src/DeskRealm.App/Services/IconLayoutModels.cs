@@ -59,6 +59,15 @@ internal sealed class DesktopIconPosition
     [JsonPropertyName("displayName")]
     public string DisplayName { get; set; } = string.Empty;
 
+    [JsonPropertyName("shellDisplayName")]
+    public string ShellDisplayName { get; set; } = string.Empty;
+
+    [JsonPropertyName("shellParsingName")]
+    public string ShellParsingName { get; set; } = string.Empty;
+
+    [JsonPropertyName("identityKeys")]
+    public List<string> IdentityKeys { get; set; } = [];
+
     [JsonPropertyName("x")]
     public int X { get; set; }
 
