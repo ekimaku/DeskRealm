@@ -43,6 +43,16 @@ powershell -ExecutionPolicy Bypass -File .\Uninstall-DeskRealm.ps1
 
 By default, uninstall preserves `%APPDATA%\DeskRealm` and `%LOCALAPPDATA%\DeskRealm` so your config, icon layouts and logs are not destroyed. Use `-RemoveUserConfig` only if you intentionally want a full cleanup.
 
+## Upgrading from v0.5.0-v0.5.5
+
+1. Quit DeskRealm from the tray.
+2. Replace the app files with the new release files.
+3. Launch DeskRealm.
+4. Use **Save icon layout now** once on each important realm so v0.5.6 can refresh layouts with display-topology and Shell identity metadata.
+5. Test your normal monitor/resolution/DPI setup, then any known alternate setup such as one monitor off or a game resolution.
+
+DeskRealm migrates config automatically, but old icon layout files only gain the richest v0.5.6 identity metadata after they are saved again.
+
 ## Build from source
 
 Install the .NET 8 SDK, then run:

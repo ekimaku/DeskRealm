@@ -16,6 +16,18 @@ DeskRealm stores local files only:
 %LOCALAPPDATA%\DeskRealm\logs\deskrealm.log
 ```
 
+Icon layout files can contain:
+
+```text
+virtual desktop GUIDs
+realm names
+Desktop icon positions
+Shell display/parsing identity metadata for icons
+monitor topology metadata: resolution, bounds, orientation, DPI / scale
+```
+
+This data stays local and is used only to restore the Desktop view.
+
 ## Network behavior
 
 DeskRealm has no network feature and no telemetry.
@@ -25,6 +37,10 @@ DeskRealm has no network feature and no telemetry.
 DeskRealm rejects OneDrive Desktop paths by default because dynamic Desktop Known Folder switching can interact badly with folder synchronization.
 
 You can disable this check manually, but that is not recommended unless you understand the risk.
+
+## Display topology warning
+
+DeskRealm tracks display topology to avoid corrupting icon layouts when monitors, resolution or DPI / scale change. It intentionally skips icon-layout saves while such changes are settling.
 
 ## Emergency restore
 

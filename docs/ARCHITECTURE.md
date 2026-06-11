@@ -10,10 +10,11 @@ DeskRealm makes Windows virtual desktops feel like separate workspaces by assign
 Virtual desktop change detected
   -> read current virtual desktop GUID
   -> resolve/create/adopt/rename realm folder
-  -> save previous realm icon layout when applicable
+  -> save previous realm icon layout only when the current desktop/path state is safe
   -> redirect Desktop Known Folder to target realm folder
   -> request Explorer/Shell refresh
-  -> restore target realm icon layout when applicable
+  -> defer icon restore until Explorer has settled on the target realm
+  -> restore target realm icon layout using the best display-topology variant
 ```
 
 ## Main services
@@ -21,13 +22,14 @@ Virtual desktop change detected
 | Service | Role |
 |---|---|
 | `VirtualDesktopRegistryService` | Reads virtual desktop GUIDs, names, order, and current desktop from Explorer registry state. |
-| `RealmConfigService` | Loads/saves `%APPDATA%\DeskRealm\deskrealm.config.json`. |
+| `RealmConfigService` | Loads/saves `%APPDATA%\DeskRealm\deskrealm.config.json` and migrates config versions. |
 | `KnownFolderService` | Gets/sets the current user's Desktop Known Folder path. |
 | `ShellRefreshService` | Requests Shell/Explorer refresh after a Desktop path switch. |
-| `DesktopSwitchService` | Main orchestrator for switching, folder sync, save-on-switch, restore-on-exit, icon restore, and hotkey navigation. |
+| `DesktopSwitchService` | Main orchestrator for switching, folder sync, save guards, restore scheduling, hotkey navigation and restore-on-exit. |
 | `DesktopIconShellService` | Captures/restores visible Desktop icon positions through Shell folder view APIs. |
 | `IconLayoutWorkerClientService` | Runs icon layout capture/restore in a worker process to isolate COM/native crashes. |
-| `IconLayoutPersistenceService` | Reads/writes icon layout JSON files. |
+| `IconLayoutPersistenceService` | Reads/writes icon layout JSON files and manages display-topology variants. |
+| `DisplayTopologyService` | Captures monitor/resolution/orientation/DPI state used to key layout variants. |
 | `GlobalHotkeyService` | Registers system-wide hotkeys and forwards `WM_HOTKEY` events. |
 | `KeyboardInputService` | Sends `Win+Ctrl+Left/Right` navigation steps with `SendInput`. |
 | `StartupService` | Toggles HKCU Run startup entry. |
@@ -43,7 +45,7 @@ DeskRealm therefore:
 2. calculates how many left/right steps are needed;
 3. sends official Windows virtual desktop shortcuts;
 4. waits until registry state confirms the target desktop;
-5. then applies the DeskRealm folder/layout switch.
+5. applies the DeskRealm folder/layout switch.
 
 ## Icon layout strategy
 
@@ -53,9 +55,35 @@ Icon positions are persisted per virtual desktop GUID:
 %APPDATA%\DeskRealm\icon-layouts\<virtual-desktop-guid>.json
 ```
 
-Each visible icon is keyed by a stable PIDL-derived item key. This avoids relying on display order mismatches between different Shell enumeration APIs.
+The layout file can contain multiple variants keyed by display topology:
 
-DeskRealm does not poll icon positions periodically by default. It saves layouts on useful lifecycle events: switching away from a realm, manual save, and exit restore. This avoids periodic Shell worker launches and cursor busy-state flicker.
+```text
+virtual desktop GUID
+  -> exact topology variant: monitors + resolution + orientation + DPI / scale
+  -> family topology variant: best-effort compatible monitor family
+  -> icons with absolute and screen-relative positions
+```
+
+This lets DeskRealm keep valid layouts for normal multi-monitor use, single-monitor fallback, temporary game resolutions and Windows scale changes.
+
+## Icon identity strategy
+
+Icon restore uses layered matching:
+
+1. exact PIDL-derived `itemKey` match;
+2. Shell display/parsing/name identity fallback;
+3. warning log for unresolved saved icons.
+
+This is required because Explorer may expose the same visible shortcut with a different PIDL after Desktop folder switches, display changes, or Shell reflows. The fallback is especially useful when the same shortcut exists on multiple realms with different positions.
+
+## Save/restore guards
+
+DeskRealm avoids silent contamination with explicit guards:
+
+- skip saves if the known Desktop folder belongs to one realm but the current Windows virtual desktop is another;
+- skip saves while display topology is changing/settling;
+- defer restore after a switch so previous-realm icons are not mistaken for target-realm icons;
+- retry restore if Explorer reflows after the first placement pass.
 
 ## Worker isolation
 

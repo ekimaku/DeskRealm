@@ -6,13 +6,25 @@ DeskRealm uses GitHub Actions to build Windows artifacts.
 
 Every push to `main` builds the app and uploads workflow artifacts.
 
+A pushed tag matching `v*` creates a GitHub Release and attaches the release assets.
+
 ## Public release
 
-Create and push a tag:
+Recommended local helper command:
 
 ```powershell
-git tag v0.5.1
-git push origin v0.5.1
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.6 -DryRun
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.6
+```
+
+Manual release flow:
+
+```powershell
+git add -A
+git commit -m "Release DeskRealm v0.5.6"
+git push origin main
+git tag -a v0.5.6 -m "DeskRealm v0.5.6"
+git push origin v0.5.6
 ```
 
 The `Build and release` workflow will:
@@ -28,18 +40,27 @@ The `Build and release` workflow will:
 - `DeskRealm-<version>-win-x64-portable.zip` — simplest user download.
 - `DeskRealm-<version>-win-x64-install-bundle.zip` — includes `Install-DeskRealm.ps1` and `Uninstall-DeskRealm.ps1`.
 
+## Release notes source
+
+`CHANGELOG.md` is the source of truth for release notes. The local helper extracts the requested version section and updates the GitHub Release body after the tag-triggered workflow creates the release.
+
+Manual update after the workflow succeeds:
+
+```powershell
+gh release edit v0.5.6 --repo ekimaku/DeskRealm --title "DeskRealm v0.5.6" --notes-file ".release-work\release-notes-v0.5.6-from-changelog.md"
+```
+
 ## Notes
 
 DeskRealm does not currently ship a signed MSI/EXE installer. The install bundle is intentionally transparent PowerShell so users can inspect what it does before running it. A signed MSI may be added later if the project grows.
 
-## Local release helper
+## Troubleshooting releases
 
-A local helper script can be kept in `.local-tools/Publish-DeskRealmRelease.ps1`. The folder is ignored by Git on purpose, so maintainer automation does not become part of the public repository.
-
-Typical command:
+Watch recent runs:
 
 ```powershell
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.1
+gh run list --repo ekimaku/DeskRealm --limit 5
+gh run watch --repo ekimaku/DeskRealm --compact --exit-status
 ```
 
-The helper uses `CHANGELOG.md` as the source for the GitHub Release body and updates the release after the tag-triggered workflow has created the assets.
+If a release was created manually or notes need to be refreshed, use `gh release edit --notes-file` rather than recreating the tag.

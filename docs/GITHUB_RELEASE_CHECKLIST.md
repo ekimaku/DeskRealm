@@ -16,9 +16,11 @@
   windows virtual-desktops desktop-icons productivity winforms dotnet
   ```
 
-## Before first tag
+## Before a tag
 
-- [ ] Verify `README.md` renders correctly on GitHub.
+- [ ] Verify `README.md` renders correctly on GitHub and shows the current version.
+- [ ] Verify `CHANGELOG.md` contains the target version section.
+- [ ] Verify `docs/release-notes/v<version>.md` exists if the workflow uses it directly.
 - [ ] Verify `LICENSE`, `NOTICE`, `CITATION.cff` and `THIRD_PARTY_NOTICES.md` are present.
 - [ ] Verify `docs/SAFETY_AND_PRIVACY.md` is linked from the README.
 - [ ] Build locally on Windows:
@@ -31,26 +33,46 @@
   - Desktop switching works.
   - Name sync works.
   - Icon layout save/restore works.
+  - Same icons on several realms keep separate positions.
+  - Multi-monitor / resolution / DPI variants restore correctly.
   - Hotkeys work.
   - Startup toggle works.
   - Restore original Desktop works.
 
 ## Create release
 
+Preferred helper:
+
 ```powershell
-git tag v0.5.1
-git push origin v0.5.1
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.6 -DryRun
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.6
+```
+
+Manual fallback:
+
+```powershell
+git add -A
+git commit -m "Release DeskRealm v0.5.6"
+git push origin main
+git tag -a v0.5.6 -m "DeskRealm v0.5.6"
+git push origin v0.5.6
 ```
 
 The GitHub Actions workflow will build and attach:
 
-- `DeskRealm-0.5.1-win-x64-portable.zip`
-- `DeskRealm-0.5.1-win-x64-install-bundle.zip`
+- `DeskRealm-0.5.6-win-x64-portable.zip`
+- `DeskRealm-0.5.6-win-x64-install-bundle.zip`
 
 ## After release
 
 - [ ] Download both release assets from GitHub.
 - [ ] Test the portable ZIP on your machine.
 - [ ] Test the install bundle on your machine.
+- [ ] Update release notes from `CHANGELOG.md` if the helper did not finish:
+
+  ```powershell
+  gh release edit v0.5.6 --repo ekimaku/DeskRealm --title "DeskRealm v0.5.6" --notes-file ".release-work\release-notes-v0.5.6-from-changelog.md"
+  ```
+
 - [ ] Add screenshots/GIFs to the README if desired.
-- [ ] Create follow-up issues for signed installer, UI settings window and optional icon.
+- [ ] Create follow-up issues for signed installer, UI settings window and diagnostics panel.

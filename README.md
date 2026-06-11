@@ -1,4 +1,4 @@
-# DeskRealm v0.5.1
+# DeskRealm v0.5.6
 
 **DeskRealm turns Windows virtual desktops into real, separated Desktop realms.**
 
@@ -8,7 +8,18 @@ Each Windows virtual desktop gets its own Desktop folder, its own icon layout, a
 
 ## Status
 
-DeskRealm is currently a personal open-source Windows utility. It is stable enough for the original workflow, but it intentionally touches the Windows Desktop Known Folder, so read the safety notes before running it.
+DeskRealm is a personal open-source Windows utility. Version `v0.5.6` is the current stable hotfix line for the original workflow and includes the icon-layout fixes validated on real multi-monitor / resolution / DPI setups.
+
+DeskRealm intentionally touches the Windows Desktop Known Folder. Read the safety notes before running it, especially if your Desktop is synchronized by OneDrive.
+
+## Highlights in v0.5.6
+
+- Stable icon layouts across repeated shortcuts/icons on multiple realms.
+- Display-topology-aware layouts: active monitors, resolution, orientation, virtual bounds and DPI / scale are part of the saved layout context.
+- Deferred icon restore after desktop switches so Explorer has time to show the target realm before positions are applied.
+- Verified restore with retry for icons that do not move on the first Shell placement pass.
+- Shell identity fallback: exact PIDL matching is tried first, then human-readable Shell identity keys are used when Explorer exposes the same shortcut with a different PIDL.
+- Background icon polling is disabled by default to avoid periodic busy-cursor flicker.
 
 ## Features
 
@@ -16,7 +27,8 @@ DeskRealm is currently a personal open-source Windows utility. It is stable enou
 - Folder names synchronized from the names shown in Windows Task View / `Win + Tab`.
 - Existing realm folders are renamed, not duplicated, when the workspace name changes.
 - Per-realm Desktop icon layout save/restore.
-- Quiet icon layout persistence: layouts are saved on desktop switch, manual save, and exit restore. Background autosave is disabled by default to avoid pointer busy-cursor flicker.
+- Per-display-topology icon layout variants for monitor, resolution, orientation and scale changes.
+- Guarded icon saves to prevent cross-desktop contamination during fast switches or display changes.
 - Configurable global hotkeys to jump to numbered desktops.
 - Optional startup with Windows from the tray menu.
 - Tray app with status, config, logs, restore, pause/resume, and manual sync actions.
@@ -49,9 +61,30 @@ DeskRealm combines several Windows mechanisms:
 - redirects the current user's Desktop Known Folder to the matching realm folder;
 - requests a Shell refresh so Explorer redraws the Desktop;
 - captures/restores Desktop icon positions through the supported Shell folder view API;
+- stores icon layouts per virtual desktop and per display topology;
 - avoids background Shell icon polling by default;
 - registers global hotkeys with `RegisterHotKey`;
 - optionally adds/removes an HKCU Run entry for startup.
+
+## Icon layout model
+
+Icon layouts are stored here:
+
+```text
+%APPDATA%\DeskRealm\icon-layouts\<virtual-desktop-guid>.json
+```
+
+Since v0.5.6, each file can contain multiple display-topology variants. This lets DeskRealm keep different valid layouts for situations such as:
+
+```text
+- two monitors active at normal resolution / scale
+- one monitor temporarily disconnected or asleep
+- a game changing resolution
+- Windows display scale / DPI changed
+- same shortcut visible on several realms at different positions
+```
+
+When saving/restoring icons, DeskRealm first matches icons by exact Shell PIDL-derived identity. If Explorer exposes the same visible shortcut with a changed PIDL, DeskRealm falls back to Shell display/parsing identity keys.
 
 ## Default realm layout
 
@@ -80,7 +113,8 @@ DeskRealm is intentionally strict:
 - it refuses duplicate virtual desktop names;
 - it refuses folder rename conflicts instead of merging folders;
 - it refuses invalid virtual desktop registry state;
-- it refuses ambiguous icon layout restore;
+- it refuses icon saves while the active Windows virtual desktop and known Desktop realm are out of sync;
+- it refuses icon saves while display topology is settling;
 - it disables icon persistence for the current session if the isolated Shell icon worker fails, but keeps the core Desktop switching alive;
 - it provides an emergency restore script.
 
@@ -181,11 +215,13 @@ Config file:
 %APPDATA%\DeskRealm\deskrealm.config.json
 ```
 
+Current config version: `4`.
+
 Example:
 
 ```json
 {
-  "version": 2,
+  "version": 4,
   "enabled": true,
   "pollIntervalMs": 750,
   "restoreDesktopOnExit": true,
@@ -196,6 +232,12 @@ Example:
   "iconLayoutSettleDelayMs": 500,
   "iconLayoutAutoSaveEnabled": false,
   "iconLayoutAutoSaveIntervalMs": 60000,
+  "iconLayoutWorkerTimeoutMs": 8000,
+  "iconLayoutDisplayTopologyGuardEnabled": true,
+  "iconLayoutDisplayTopologySettleDelayMs": 1200,
+  "iconLayoutSwitchRestoreDelayMs": 1400,
+  "iconLayoutRestoreRetryCount": 2,
+  "iconLayoutRestoreRetryDelayMs": 450,
   "desktopHotkeysEnabled": true,
   "desktopHotkeys": {
     "1": "Win+Shift+W",
@@ -218,36 +260,20 @@ Example:
 }
 ```
 
-See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for details.
-
-## Logs
-
-```text
-%LOCALAPPDATA%\DeskRealm\logs\deskrealm.log
-```
+See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
 
 ## Documentation
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
-- [`docs/SAFETY_AND_PRIVACY.md`](docs/SAFETY_AND_PRIVACY.md)
-- [`docs/ATTRIBUTION_GUIDE.md`](docs/ATTRIBUTION_GUIDE.md)
-- [`docs/REFERENCES.md`](docs/REFERENCES.md)
 - [`docs/INSTALLATION.md`](docs/INSTALLATION.md)
-- [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md)
-- [`docs/GITHUB_RELEASE_CHECKLIST.md`](docs/GITHUB_RELEASE_CHECKLIST.md)
-- [`CHANGELOG.md`](CHANGELOG.md)
+- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/SAFETY_AND_PRIVACY.md`](docs/SAFETY_AND_PRIVACY.md)
+- [`docs/REFERENCES.md`](docs/REFERENCES.md)
 
-## License and attribution
+## License
 
-DeskRealm is licensed under the **Apache License 2.0**. See [`LICENSE`](LICENSE).
+Apache License 2.0. See [`LICENSE`](LICENSE).
 
-This repository also includes a [`NOTICE`](NOTICE) file and [`CITATION.cff`](CITATION.cff). If you redistribute DeskRealm or derivative works containing substantial portions of it, preserve the license and notice files as required by Apache-2.0. If DeskRealm inspires your own project without copying source code, attribution is requested via `CITATION.cff` but cannot be imposed as a license condition for pure inspiration.
+## Attribution / citation
 
-See [`docs/ATTRIBUTION_GUIDE.md`](docs/ATTRIBUTION_GUIDE.md).
-
-## Third-party code
-
-DeskRealm currently has no NuGet package dependencies beyond the .NET / Windows Desktop stack and does not bundle third-party source code.
-
-The project is informed by official Microsoft/Win32 documentation and credited related work listed in [`docs/REFERENCES.md`](docs/REFERENCES.md) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+DeskRealm is created by **Ayahua**. If this project helps or inspires your own work, citation is appreciated. See [`CITATION.cff`](CITATION.cff) and [`docs/ATTRIBUTION_GUIDE.md`](docs/ATTRIBUTION_GUIDE.md).

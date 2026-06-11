@@ -1,34 +1,36 @@
 # DeskRealm TODO
 
-## v0.5.1 quiet icon layout hotfix
+## Current stable line: v0.5.6
 
-- [x] Audit cursor flicker cause: periodic icon worker launched by autosave timer.
-- [x] Disable background autosave by default.
-- [x] Add config migration so existing v0.5.0 installs stop polling automatically.
-- [x] Preserve automatic save-on-switch.
-- [x] Preserve save-before-exit-restore.
-- [x] Remove post-restore Shell refresh after icon placement.
-- [x] Update docs/release notes/changelog.
-- [x] Run static smoke test in sandbox.
+- [x] Disable periodic icon polling to avoid busy-cursor flicker.
+- [x] Guard saves against cross-desktop contamination.
+- [x] Store icon layouts per display topology.
+- [x] Include monitor/resolution/orientation/DPI / scale in layout context.
+- [x] Defer icon restore after fast virtual desktop switches.
+- [x] Retry icon restore after Explorer reflows.
+- [x] Verify icon positions after Shell placement.
+- [x] Add Shell identity fallback for repeated icons/shortcuts across realms.
+- [x] Update README/docs for v0.5.6 behavior.
 
-## v0.5.3 display topology aware icon layouts
+## Suggested next versions
 
-- [x] Audit multi-screen / resolution / scale contamination risk.
-- [x] Add display topology snapshot with screens, bounds, orientation and effective DPI.
-- [x] Store multiple layout variants per virtual desktop.
-- [x] Add screen-relative icon metadata for best-effort restore.
-- [x] Guard saves while display topology changes are settling.
-- [x] Restore current realm after topology settles.
-- [x] Update changelog, release notes, patch notes and configuration docs.
-- [x] Run static smoke test in sandbox.
+### v0.6.0 — User-facing settings / diagnostics
 
-## Future ideas
+- [ ] Settings window for safe config changes.
+- [ ] Diagnostic panel showing current realm, known Desktop path, virtual desktop GUID and display topology key.
+- [ ] Icon layout diagnostics: unresolved icon list with display name, parsing name and identity keys.
+- [ ] Button to reset only one realm layout or one topology variant.
 
-- Optional signed installer.
-- Settings UI for config values.
-- More robust diagnostics panel.
-## v0.5.2 follow-up
+### v0.7.0 — Installer / polish
 
-- Validate same-icon/different-position layouts across at least two realms.
-- Observe whether manual Windows Task View switching needs a future event-based pre-switch save model.
+- [ ] Signed installer research.
+- [ ] Better tray icon / branding.
+- [ ] Optional first-run safety wizard.
+- [ ] Optional README screenshots/GIFs.
 
+## Backlog
+
+- Optional export/import of DeskRealm config and layouts.
+- Optional per-realm icon layout cleanup.
+- Optional advanced hotkey editor.
+- Optional issue template auto-collecting DeskRealm log snippets.

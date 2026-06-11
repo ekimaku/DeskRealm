@@ -1,57 +1,126 @@
-# DeskRealm configuration
+# Configuration
 
-Config path:
+DeskRealm stores its user configuration here:
 
 ```text
 %APPDATA%\DeskRealm\deskrealm.config.json
 ```
 
-After editing the file manually, use the tray action:
+Current config version: `4`.
+
+## Main settings
+
+| Setting | Default | Purpose |
+|---|---:|---|
+| `enabled` | `true` | Enables Desktop realm switching. |
+| `pollIntervalMs` | `750` | Main virtual desktop/watch loop interval. Minimum strict value: `250`. |
+| `restoreDesktopOnExit` | `true` | Restores the original Desktop Known Folder path when DeskRealm exits. |
+| `rejectOneDriveDesktop` | `true` | Refuses OneDrive Desktop paths by default. |
+| `syncRealmNamesWithVirtualDesktopNames` | `true` | Uses Windows Task View names as realm folder names. |
+| `realmNameMaxLength` | `80` | Maximum sanitized realm folder name length. |
+| `startWithWindows` | `false` | Tray-controlled HKCU Run startup setting. |
+
+## Icon layout settings
+
+| Setting | Default | Purpose |
+|---|---:|---|
+| `iconLayoutPersistenceEnabled` | `true` | Enables icon layout capture/restore. |
+| `iconLayoutSettleDelayMs` | `500` | Delay before capturing/restoring icon positions after Shell refresh. |
+| `iconLayoutAutoSaveEnabled` | `false` | Compatibility setting. Background icon polling is disabled by default. |
+| `iconLayoutAutoSaveIntervalMs` | `60000` | Legacy/compatibility interval for periodic autosave. Recommended value: keep default. |
+| `iconLayoutWorkerTimeoutMs` | `8000` | Timeout for isolated Shell icon worker operations. |
+| `iconLayoutDisplayTopologyGuardEnabled` | `true` | Refuses saves while display topology is changing/settling. |
+| `iconLayoutDisplayTopologySettleDelayMs` | `1200` | Wait time after monitor/resolution/DPI changes before restoring. |
+| `iconLayoutSwitchRestoreDelayMs` | `1400` | Wait time after virtual desktop/folder switch before restoring icons. |
+| `iconLayoutRestoreRetryCount` | `2` | Number of restore attempts after a switch. Strict range: `1` to `5`. |
+| `iconLayoutRestoreRetryDelayMs` | `450` | Delay between restore retry attempts. |
+
+## Quiet icon persistence model
+
+Since v0.5.1, DeskRealm does not poll icon positions every few seconds by default. Periodic Shell capture can briefly show the Windows busy cursor, so the quiet model is:
 
 ```text
-Reload hotkeys from config
+manual save
+save before switching away from a realm
+save before restoring the original Desktop path on exit
+restore after switching into a realm
 ```
 
-or restart DeskRealm for full reload.
+## Display-topology-aware layouts
 
-## Main options
+Since v0.5.3, layouts are separated by display topology. A topology includes:
 
-| Key | Default | Description |
-|---|---:|---|
-| `enabled` | `true` | Enables automatic desktop switching. |
-| `pollIntervalMs` | `750` | How often DeskRealm checks the active virtual desktop. |
-| `restoreDesktopOnExit` | `true` | Restores the original Desktop path when quitting. |
-| `rejectOneDriveDesktop` | `true` | Refuses to operate if the original Desktop path appears to be under OneDrive. |
-| `syncRealmNamesWithVirtualDesktopNames` | `true` | Renames/adopts realm folders based on Win+Tab desktop names. |
-| `realmNameMaxLength` | `80` | Maximum sanitized realm folder name length. |
-| `iconLayoutPersistenceEnabled` | `true` | Enables icon layout save/restore. |
-| `iconLayoutSettleDelayMs` | `500` | Delay after Shell refresh before layout restore. Increase slightly if icons are restored too early. |
-| `iconLayoutAutoSaveEnabled` | `false` | Compatibility setting from v0.5.0. Background polling is disabled in v0.5.1 and the recommended value is `false`. |
-| `iconLayoutAutoSaveIntervalMs` | `60000` | Compatibility setting retained for old configs. |
-| `iconLayoutDisplayTopologyGuardEnabled` | `true` | Prevents saves while monitor/resolution/DPI topology changes are settling. |
-| `iconLayoutDisplayTopologySettleDelayMs` | `1200` | Delay before restoring after a display topology change. |
-| `desktopHotkeysEnabled` | `true` | Enables global hotkeys. |
-| `desktopHotkeys` | see below | Maps virtual desktop number to hotkey string. |
-| `hotkeyInitialDelayMs` | `180` | Delay after a global hotkey before sending navigation keystrokes. |
-| `hotkeySwitchStepDelayMs` | `160` | Delay between each Win+Ctrl+Left/Right step. |
-| `hotkeySwitchSettleTimeoutMs` | `3000` | Timeout while waiting for Windows registry state to confirm the target desktop. |
-| `startWithWindows` | `false` | Updated by tray menu when startup is toggled. |
+```text
+active monitors
+virtual desktop bounds
+monitor bounds / working areas
+primary monitor
+resolution
+orientation
+effective DPI / scale percentage
+```
 
+This prevents layouts from being overwritten when Windows temporarily changes the desktop view, for example:
 
-## Icon layout save model
+```text
+main monitor sleeps but secondary monitor stays active
+a game changes resolution
+Windows display scale changes
+monitor orientation changes
+```
 
-Since v0.5.1, DeskRealm does not poll the Desktop icon layout every few seconds by default. Periodic Shell capture can briefly show the Windows busy cursor, so the quiet model is:
+When a topology changes, DeskRealm temporarily refuses icon layout saves, waits for the topology to settle, then restores the current realm using the best available variant.
 
-- save the active realm layout before switching away;
-- restore the target realm layout after the Desktop folder switch;
-- save the active realm layout before restoring the original Desktop on exit;
-- keep manual tray actions for explicit save/restore.
+## Fast-switch stabilization
 
-`iconLayoutAutoSaveEnabled` still exists for config compatibility, but v0.5.1+ does not rely on periodic background capture. The recommended value is `false`.
+Since v0.5.4, DeskRealm defers icon layout restore after switching Desktop folders. This prevents the following contamination case:
 
-Since v0.5.3, icon layouts are also separated by display topology. The topology includes active monitors, virtual desktop bounds, resolution, orientation and effective DPI / scale. When Windows changes display topology, DeskRealm temporarily refuses icon layout saves, waits for the topology to settle, then restores the active realm layout before allowing future saves. This prevents a one-monitor, game-resolution, or scale-changed layout from overwriting the normal layout.
+```text
+previous realm icons are still visible
+Windows virtual desktop has already changed
+DeskRealm saves/restores too early
+positions from one realm contaminate another
+```
 
-## Default hotkeys
+Recommended defaults:
+
+```json
+{
+  "iconLayoutSwitchRestoreDelayMs": 1400,
+  "iconLayoutRestoreRetryCount": 2,
+  "iconLayoutRestoreRetryDelayMs": 450
+}
+```
+
+## Repeated icon identity fallback
+
+Since v0.5.6, saved icon entries include additional Shell identity metadata:
+
+```json
+{
+  "itemKey": "pidl-sha256:...",
+  "displayName": "Opera Browser",
+  "shellDisplayName": "Opera Browser",
+  "shellParsingName": "...",
+  "identityKeys": [
+    "pidl-sha256:...",
+    "shell-display:opera browser",
+    "shell-parsing:..."
+  ]
+}
+```
+
+Restore order:
+
+1. exact PIDL-derived key match;
+2. Shell display/parsing/name fallback match;
+3. warning log if the saved icon still cannot be found in the current Desktop view.
+
+After upgrading from older versions, use **Save icon layout now** once per important realm to refresh layouts with the new identity metadata.
+
+## Hotkeys
+
+Default hotkeys:
 
 ```json
 "desktopHotkeys": {
@@ -64,16 +133,6 @@ Since v0.5.3, icon layouts are also separated by display topology. The topology 
 }
 ```
 
-## Supported hotkey syntax
-
-Examples:
-
-```text
-Win+Shift+W
-Ctrl+Alt+1
-Win+Alt+F1
-```
-
 Supported modifier tokens:
 
 ```text
@@ -81,6 +140,14 @@ Win
 Ctrl
 Shift
 Alt
+```
+
+Examples:
+
+```text
+Win+Shift+W
+Ctrl+Alt+1
+Win+Alt+F1
 ```
 
 DeskRealm does not silently replace rejected shortcuts. If a combination is already used by Windows or another app, the failure is logged and that binding is skipped.
@@ -99,21 +166,5 @@ DeskRealm is strict:
 - source missing, target exists: adopt target and update config;
 - source and target both exist: stop with explicit conflict;
 - duplicate virtual desktop names: stop with explicit conflict;
-- invalid current virtual desktop GUID: stop with explicit error.
-
-
-## Icon layout switch stabilization
-
-`iconLayoutSwitchRestoreDelayMs` controls how long DeskRealm waits after changing the known Desktop folder before applying the target realm icon layout. This protects fast virtual desktop jumps where Explorer may briefly keep showing the previous realm icons.
-
-`iconLayoutRestoreRetryCount` and `iconLayoutRestoreRetryDelayMs` allow DeskRealm to re-apply the same layout shortly after the first restore, reducing icon drift when Explorer performs a late reflow.
-
-Recommended defaults:
-
-```json
-{
-  "iconLayoutSwitchRestoreDelayMs": 1400,
-  "iconLayoutRestoreRetryCount": 2,
-  "iconLayoutRestoreRetryDelayMs": 450
-}
-```
+- invalid current virtual desktop GUID: stop with explicit error;
+- known Desktop path and current Windows virtual desktop mismatch: skip/refuse icon layout save.

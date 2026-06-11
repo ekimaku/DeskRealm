@@ -1,5 +1,7 @@
 # Changelog
 
+Current stable: `v0.5.6`.
+
 ## v0.5.6 — Shell identity fallback for repeated icons
 
 - Stores Shell display/parsing identity metadata for desktop icons in addition to the PIDL-derived key.
