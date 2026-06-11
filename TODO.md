@@ -1,6 +1,6 @@
 # DeskRealm TODO
 
-## Current stable line: v0.5.6
+## Current stable line: v0.5.7
 
 - [x] Disable periodic icon polling to avoid busy-cursor flicker.
 - [x] Guard saves against cross-desktop contamination.
@@ -10,7 +10,9 @@
 - [x] Retry icon restore after Explorer reflows.
 - [x] Verify icon positions after Shell placement.
 - [x] Add Shell identity fallback for repeated icons/shortcuts across realms.
-- [x] Update README/docs for v0.5.6 behavior.
+- [x] Add first-run Desktop import wizard.
+- [x] Add config v5 migration so existing installs are not interrupted by the wizard.
+- [x] Update README/docs for v0.5.7 behavior.
 
 ## Suggested next versions
 
@@ -25,7 +27,6 @@
 
 - [ ] Signed installer research.
 - [ ] Better tray icon / branding.
-- [ ] Optional first-run safety wizard.
 - [ ] Optional README screenshots/GIFs.
 
 ## Backlog

@@ -43,15 +43,28 @@ powershell -ExecutionPolicy Bypass -File .\Uninstall-DeskRealm.ps1
 
 By default, uninstall preserves `%APPDATA%\DeskRealm` and `%LOCALAPPDATA%\DeskRealm` so your config, icon layouts and logs are not destroyed. Use `-RemoveUserConfig` only if you intentionally want a full cleanup.
 
-## Upgrading from v0.5.0-v0.5.5
+## Upgrading from v0.5.0-v0.5.6
 
 1. Quit DeskRealm from the tray.
 2. Replace the app files with the new release files.
 3. Launch DeskRealm.
-4. Use **Save icon layout now** once on each important realm so v0.5.6 can refresh layouts with display-topology and Shell identity metadata.
+4. Use **Save icon layout now** once on each important realm if you are upgrading from a version older than v0.5.6, so layouts are refreshed with display-topology and Shell identity metadata.
 5. Test your normal monitor/resolution/DPI setup, then any known alternate setup such as one monitor off or a game resolution.
 
-DeskRealm migrates config automatically, but old icon layout files only gain the richest v0.5.6 identity metadata after they are saved again.
+DeskRealm migrates config automatically. Existing installs are marked as first-run-import completed so the v0.5.7 wizard does not interrupt upgrades. Old icon layout files only gain the richest v0.5.6+ identity metadata after they are saved again.
+
+
+## First run on a new installation
+
+On a fresh v0.5.7 installation, DeskRealm can offer to import the current Windows Desktop before the first automatic realm switch.
+
+The wizard lets you choose:
+
+- which Windows virtual desktop should receive the current Desktop;
+- whether existing Desktop files and shortcuts should be moved into that realm;
+- whether the current icon positions should be saved as that realm's initial layout.
+
+The import is strict: if a file with the same name already exists in the target realm, DeskRealm stops and shows an explicit conflict instead of overwriting or merging.
 
 ## Build from source
 

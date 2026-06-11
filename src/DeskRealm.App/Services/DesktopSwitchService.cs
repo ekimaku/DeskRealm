@@ -184,6 +184,110 @@ internal sealed class DesktopSwitchService
     }
 
 
+
+    public bool ShouldOfferInitialDesktopImport()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        return Config.InitialDesktopImportPromptEnabled &&
+               !Config.InitialDesktopImportPromptCompleted &&
+               !string.IsNullOrWhiteSpace(Config.OriginalDesktopPath) &&
+               Directory.Exists(Config.OriginalDesktopPath) &&
+               PathsEqual(_knownFolder.GetDesktopPath(), Config.OriginalDesktopPath);
+    }
+
+    public IReadOnlyList<VirtualDesktopInfo> GetVirtualDesktopsSnapshot()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        return _virtualDesktop.GetVirtualDesktops();
+    }
+
+    public Guid GetCurrentVirtualDesktopId()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        return _virtualDesktop.GetCurrentVirtualDesktop().Id;
+    }
+
+    public void MarkInitialDesktopImportSkipped()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        Config.InitialDesktopImportPromptCompleted = true;
+        _configService.Save(Config);
+        _logger.Info("Initial Desktop import skipped by user.");
+    }
+
+    public void ImportOriginalDesktopToVirtualDesktop(Guid targetDesktopId, bool moveFiles, bool saveLayout)
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var originalDesktop = Config.OriginalDesktopPath
+            ?? throw new InvalidOperationException("originalDesktopPath absent dans la config.");
+
+        if (!Directory.Exists(originalDesktop))
+        {
+            throw new DirectoryNotFoundException($"Desktop original introuvable : {originalDesktop}");
+        }
+
+        var knownDesktop = _knownFolder.GetDesktopPath();
+        if (!PathsEqual(knownDesktop, originalDesktop))
+        {
+            throw new InvalidOperationException(
+                "Import Desktop initial refusé : le Desktop connu actif n'est plus le Desktop original. " +
+                $"Attendu : {originalDesktop}. Actuel : {knownDesktop}.");
+        }
+
+        var targetDesktop = _virtualDesktop.GetVirtualDesktops().FirstOrDefault(d => d.Id == targetDesktopId)
+            ?? throw new InvalidOperationException($"Bureau virtuel cible introuvable : {targetDesktopId:B}");
+
+        var targetRealmPath = ResolveRealmPath(targetDesktop, createIfMissing: true);
+        var targetRealmName = Path.GetFileName(targetRealmPath);
+
+        if (PathsEqual(originalDesktop, targetRealmPath))
+        {
+            throw new InvalidOperationException("Import Desktop initial refusé : le realm cible pointe déjà vers le Desktop original.");
+        }
+
+        EnsureInitialImportCanMove(originalDesktop, targetRealmPath, moveFiles);
+
+        EnsureIconLayoutsNotDisabledForSession();
+        if (saveLayout && Config.IconLayoutPersistenceEnabled)
+        {
+            _iconLayouts.Save(targetDesktop.Id, targetRealmName, Config.IconLayoutWorkerTimeoutMs);
+            _logger.Info($"Initial Desktop import layout saved before file move: {targetRealmName} {targetDesktop.Id:B}.");
+        }
+
+        var movedCount = moveFiles ? MoveInitialDesktopItems(originalDesktop, targetRealmPath) : 0;
+
+        Config.InitialDesktopImportPromptCompleted = true;
+        Config.InitialDesktopImportMoveFiles = moveFiles;
+        Config.InitialDesktopImportSaveLayout = saveLayout;
+        _configService.Save(Config);
+
+        _lastDesktopId = null;
+        _lastMessage = moveFiles
+            ? $"Desktop initial importé vers {targetRealmName} ({movedCount} élément(s))."
+            : $"Layout Desktop initial enregistré pour {targetRealmName}.";
+        _logger.Info($"Initial Desktop import completed: target={targetRealmName} {targetDesktop.Id:B}, moveFiles={moveFiles}, moved={movedCount}, saveLayout={saveLayout}.");
+    }
+
     public void SaveIconLayoutNow()
     {
         if (_config is null)
@@ -266,6 +370,79 @@ internal sealed class DesktopSwitchService
         _lastSwitchAt = DateTimeOffset.Now;
         _lastMessage = $"Desktop original restauré : {original}";
         _logger.Info(_lastMessage);
+    }
+
+
+
+    private void EnsureInitialImportCanMove(string originalDesktop, string targetRealmPath, bool moveFiles)
+    {
+        if (!moveFiles)
+        {
+            return;
+        }
+
+        foreach (var source in EnumerateInitialDesktopImportCandidates(originalDesktop, targetRealmPath))
+        {
+            var target = Path.Combine(targetRealmPath, Path.GetFileName(source));
+            if (File.Exists(target) || Directory.Exists(target))
+            {
+                throw new IOException(
+                    "Import Desktop initial refusé : conflit de nom détecté dans le realm cible. " +
+                    $"Source : {source}. Cible existante : {target}. " +
+                    "Renomme ou déplace l'élément manuellement, puis relance l'import.");
+            }
+        }
+    }
+
+    private int MoveInitialDesktopItems(string originalDesktop, string targetRealmPath)
+    {
+        Directory.CreateDirectory(targetRealmPath);
+        var moved = 0;
+        foreach (var source in EnumerateInitialDesktopImportCandidates(originalDesktop, targetRealmPath))
+        {
+            var target = Path.Combine(targetRealmPath, Path.GetFileName(source));
+            if (Directory.Exists(source))
+            {
+                Directory.Move(source, target);
+            }
+            else
+            {
+                File.Move(source, target);
+            }
+
+            moved++;
+            _logger.Info($"Initial Desktop import moved: {source} -> {target}");
+        }
+
+        return moved;
+    }
+
+    private IEnumerable<string> EnumerateInitialDesktopImportCandidates(string originalDesktop, string targetRealmPath)
+    {
+        var realmsRoot = Config.RealmsRoot ?? string.Empty;
+        foreach (var entry in Directory.EnumerateFileSystemEntries(originalDesktop))
+        {
+            var name = Path.GetFileName(entry);
+            if (string.Equals(name, "desktop.ini", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.Info($"Initial Desktop import skips desktop.ini: {entry}");
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(realmsRoot) && PathsEqual(entry, realmsRoot))
+            {
+                _logger.Info($"Initial Desktop import skips DeskRealm realms root: {entry}");
+                continue;
+            }
+
+            if (PathsEqual(entry, targetRealmPath))
+            {
+                _logger.Info($"Initial Desktop import skips target realm path: {entry}");
+                continue;
+            }
+
+            yield return entry;
+        }
     }
 
     public DesktopSwitchStatus GetStatus()

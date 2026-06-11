@@ -5,7 +5,7 @@ namespace DeskRealm.App.Services;
 internal sealed class RealmConfig
 {
     [JsonPropertyName("version")]
-    public int Version { get; set; } = 4;
+    public int Version { get; set; } = 5;
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
@@ -21,6 +21,19 @@ internal sealed class RealmConfig
 
     [JsonPropertyName("syncRealmNamesWithVirtualDesktopNames")]
     public bool SyncRealmNamesWithVirtualDesktopNames { get; set; } = true;
+
+
+    [JsonPropertyName("initialDesktopImportPromptEnabled")]
+    public bool InitialDesktopImportPromptEnabled { get; set; } = true;
+
+    [JsonPropertyName("initialDesktopImportPromptCompleted")]
+    public bool InitialDesktopImportPromptCompleted { get; set; } = false;
+
+    [JsonPropertyName("initialDesktopImportMoveFiles")]
+    public bool InitialDesktopImportMoveFiles { get; set; } = true;
+
+    [JsonPropertyName("initialDesktopImportSaveLayout")]
+    public bool InitialDesktopImportSaveLayout { get; set; } = true;
 
     [JsonPropertyName("realmNameMaxLength")]
     public int RealmNameMaxLength { get; set; } = 80;

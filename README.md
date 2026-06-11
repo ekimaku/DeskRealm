@@ -1,4 +1,4 @@
-# DeskRealm v0.5.6
+# DeskRealm v0.5.7
 
 **DeskRealm turns Windows virtual desktops into real, separated Desktop realms.**
 
@@ -8,11 +8,11 @@ Each Windows virtual desktop gets its own Desktop folder, its own icon layout, a
 
 ## Status
 
-DeskRealm is a personal open-source Windows utility. Version `v0.5.6` is the current stable hotfix line for the original workflow and includes the icon-layout fixes validated on real multi-monitor / resolution / DPI setups.
+DeskRealm is a personal open-source Windows utility. Version `v0.5.7` keeps the validated v0.5.6 icon-layout engine and adds a first-run Desktop import wizard for new installations.
 
 DeskRealm intentionally touches the Windows Desktop Known Folder. Read the safety notes before running it, especially if your Desktop is synchronized by OneDrive.
 
-## Highlights in v0.5.6
+## Highlights in v0.5.7
 
 - Stable icon layouts across repeated shortcuts/icons on multiple realms.
 - Display-topology-aware layouts: active monitors, resolution, orientation, virtual bounds and DPI / scale are part of the saved layout context.
@@ -20,6 +20,7 @@ DeskRealm intentionally touches the Windows Desktop Known Folder. Read the safet
 - Verified restore with retry for icons that do not move on the first Shell placement pass.
 - Shell identity fallback: exact PIDL matching is tried first, then human-readable Shell identity keys are used when Explorer exposes the same shortcut with a different PIDL.
 - Background icon polling is disabled by default to avoid periodic busy-cursor flicker.
+- First-run import wizard can move the existing Windows Desktop into a selected realm and save its current icon layout.
 
 ## Features
 
@@ -27,6 +28,7 @@ DeskRealm intentionally touches the Windows Desktop Known Folder. Read the safet
 - Folder names synchronized from the names shown in Windows Task View / `Win + Tab`.
 - Existing realm folders are renamed, not duplicated, when the workspace name changes.
 - Per-realm Desktop icon layout save/restore.
+- First-run Desktop import wizard for clean onboarding on new installations.
 - Per-display-topology icon layout variants for monitor, resolution, orientation and scale changes.
 - Guarded icon saves to prevent cross-desktop contamination during fast switches or display changes.
 - Configurable global hotkeys to jump to numbered desktops.
@@ -86,6 +88,17 @@ Since v0.5.6, each file can contain multiple display-topology variants. This let
 
 When saving/restoring icons, DeskRealm first matches icons by exact Shell PIDL-derived identity. If Explorer exposes the same visible shortcut with a changed PIDL, DeskRealm falls back to Shell display/parsing identity keys.
 
+
+## First-run Desktop import
+
+On a fresh install, DeskRealm can offer to import the current Windows Desktop before the first automatic realm switch. The wizard can:
+
+- assign the current Desktop to a chosen virtual desktop realm;
+- move existing Desktop files and shortcuts into that realm;
+- save the currently visible icon positions as that realm's initial layout.
+
+The import is intentionally strict: it skips DeskRealm's own realms root and `desktop.ini`, and it refuses target name conflicts instead of overwriting or merging files silently. Existing upgraded installs do not show this wizard unexpectedly.
+
 ## Default realm layout
 
 On first run, DeskRealm stores the current Desktop path as the restore path and creates:
@@ -108,7 +121,7 @@ If name sync is disabled, DeskRealm keeps legacy `D1`, `D2`, `D3`, `D4` style na
 
 DeskRealm is intentionally strict:
 
-- it does not move, delete, copy, or silently migrate existing Desktop files;
+- it does not move, delete, copy, or silently migrate existing Desktop files during normal operation; the first-run import wizard can move Desktop items only after explicit user confirmation;
 - it refuses OneDrive Desktop redirection by default;
 - it refuses duplicate virtual desktop names;
 - it refuses folder rename conflicts instead of merging folders;
@@ -215,18 +228,22 @@ Config file:
 %APPDATA%\DeskRealm\deskrealm.config.json
 ```
 
-Current config version: `4`.
+Current config version: `5`.
 
 Example:
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "enabled": true,
   "pollIntervalMs": 750,
   "restoreDesktopOnExit": true,
   "rejectOneDriveDesktop": true,
   "syncRealmNamesWithVirtualDesktopNames": true,
+  "initialDesktopImportPromptEnabled": true,
+  "initialDesktopImportPromptCompleted": false,
+  "initialDesktopImportMoveFiles": true,
+  "initialDesktopImportSaveLayout": true,
   "realmNameMaxLength": 80,
   "iconLayoutPersistenceEnabled": true,
   "iconLayoutSettleDelayMs": 500,

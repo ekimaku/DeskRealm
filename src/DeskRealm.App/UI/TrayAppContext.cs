@@ -28,6 +28,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _logger = logger;
 
         _switchService.Initialize();
+        OfferInitialDesktopImportIfNeeded();
         SynchronizeStartupFromConfig(showErrors: false);
 
         _notifyIcon = new NotifyIcon
@@ -54,6 +55,51 @@ internal sealed class TrayAppContext : ApplicationContext
             ? "Native switch actif. Hotkeys bureaux actifs."
             : "Native switch actif. Certains hotkeys ont été refusés, voir logs.";
         _notifyIcon.ShowBalloonTip(3500, "DeskRealm", balloonText, hotkeyErrors.Count == 0 ? ToolTipIcon.Info : ToolTipIcon.Warning);
+    }
+
+
+
+    private void OfferInitialDesktopImportIfNeeded()
+    {
+        if (!_switchService.ShouldOfferInitialDesktopImport())
+        {
+            return;
+        }
+
+        try
+        {
+            using var form = new InitialDesktopImportForm(
+                _switchService.GetVirtualDesktopsSnapshot(),
+                _switchService.GetCurrentVirtualDesktopId());
+
+            var result = form.ShowDialog();
+            if (result == DialogResult.OK)
+            {
+                _switchService.ImportOriginalDesktopToVirtualDesktop(
+                    form.SelectedDesktopId,
+                    form.MoveFiles,
+                    form.SaveLayout);
+
+                MessageBox.Show(
+                    "Desktop initial importé. DeskRealm va maintenant activer le realm correspondant au bureau virtuel courant.",
+                    "DeskRealm — import terminé",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            _switchService.MarkInitialDesktopImportSkipped();
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Initial Desktop import wizard failed", ex);
+            MessageBox.Show(
+                "L'import du Desktop initial a échoué. DeskRealm ne continue pas silencieusement.\n\n" + ex.Message,
+                "DeskRealm — import Desktop initial",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            throw;
+        }
     }
 
     private ContextMenuStrip BuildMenu()

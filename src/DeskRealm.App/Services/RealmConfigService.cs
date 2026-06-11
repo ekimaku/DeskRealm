@@ -26,7 +26,8 @@ internal sealed class RealmConfigService
                 OriginalDesktopPath = currentDesktopPath,
                 RealmsRoot = Path.Combine(currentDesktopPath, "DeskRealm"),
                 NextRealmNumber = 1,
-                Enabled = true
+                Enabled = true,
+                InitialDesktopImportPromptCompleted = false
             };
 
             Save(initial);
@@ -97,6 +98,18 @@ internal sealed class RealmConfigService
 
             config.Version = 4;
             _logger.Warn("Migration config v4 : restauration layout icônes différée après switch pour laisser Explorer finir d'afficher le realm cible.");
+        }
+
+        if (config.Version < 5)
+        {
+            // Existing installs must not be interrupted by a first-run import wizard after upgrade.
+            // New configs are created directly at v5 with InitialDesktopImportPromptCompleted=false.
+            config.InitialDesktopImportPromptCompleted = true;
+            config.InitialDesktopImportPromptEnabled = true;
+            config.InitialDesktopImportMoveFiles = true;
+            config.InitialDesktopImportSaveLayout = true;
+            config.Version = 5;
+            _logger.Warn("Migration config v5 : assistant d'import du Desktop initial disponible uniquement pour les nouvelles installations.");
         }
 
         if (config.PollIntervalMs < 250)

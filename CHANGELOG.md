@@ -1,6 +1,23 @@
 # Changelog
 
-Current stable: `v0.5.6`.
+Current stable: `v0.5.7`.
+
+## v0.5.7 — First-run Desktop import wizard
+
+### Added
+- Added a first-run Desktop import wizard for new installations.
+- The wizard can assign the current Windows Desktop to a chosen virtual desktop realm before the first automatic switch.
+- The wizard can optionally move existing Desktop files and shortcuts into the selected realm.
+- The wizard can optionally save the currently visible icon positions as that realm's initial layout.
+- Added strict conflict checks for initial import: no silent overwrite, no hidden merge, and `desktop.ini` / DeskRealm's own realms root are skipped.
+- Added config version `5` with first-run import settings.
+
+### Changed
+- Existing upgraded installations are marked as import-completed during migration so the wizard does not unexpectedly interrupt users after an update.
+- Documentation, release notes, smoke tests and release checklist now describe the v0.5.7 onboarding flow while retaining the validated v0.5.6 icon layout engine.
+
+### Notes
+- The icon layout engine remains the v0.5.6-stabilized model: display-topology variants, DPI/scale awareness, delayed/verified restore, and Shell identity fallback for repeated shortcuts.
 
 ## v0.5.6 — Shell identity fallback for repeated icons
 

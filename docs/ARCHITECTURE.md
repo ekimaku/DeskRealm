@@ -97,3 +97,19 @@ Desktop icon Shell/COM interop is isolated in a worker process. If the Shell vie
 | Icon layouts | `%APPDATA%\DeskRealm\icon-layouts\*.json` |
 | Logs | `%LOCALAPPDATA%\DeskRealm\logs\deskrealm.log` |
 | Realm folders | Default: `%USERPROFILE%\Desktop\DeskRealm\...` |
+
+## First-run Desktop import
+
+Since v0.5.7, new configurations can show an import wizard before DeskRealm performs its first automatic Desktop folder switch.
+
+The flow is intentionally early:
+
+```text
+startup
+-> config created at version 5
+-> original Desktop path is still active
+-> wizard can capture/move the current Desktop
+-> normal realm switching starts after the import decision
+```
+
+The import path refuses conflicts before moving files. It skips `desktop.ini` and DeskRealm's own realms root, and it can save the currently visible icon positions as the target realm's initial layout. Existing upgraded configs are migrated with the import prompt already completed.

@@ -6,7 +6,7 @@ DeskRealm stores its user configuration here:
 %APPDATA%\DeskRealm\deskrealm.config.json
 ```
 
-Current config version: `4`.
+Current config version: `5`.
 
 ## Main settings
 
@@ -17,6 +17,10 @@ Current config version: `4`.
 | `restoreDesktopOnExit` | `true` | Restores the original Desktop Known Folder path when DeskRealm exits. |
 | `rejectOneDriveDesktop` | `true` | Refuses OneDrive Desktop paths by default. |
 | `syncRealmNamesWithVirtualDesktopNames` | `true` | Uses Windows Task View names as realm folder names. |
+| `initialDesktopImportPromptEnabled` | `true` | Enables the first-run Desktop import wizard for new configs. |
+| `initialDesktopImportPromptCompleted` | `false` for new configs, migrated to `true` for upgrades | Prevents the wizard from interrupting existing users after upgrade. |
+| `initialDesktopImportMoveFiles` | `true` | Default wizard option to move current Desktop items into the selected realm. |
+| `initialDesktopImportSaveLayout` | `true` | Default wizard option to save current icon positions as the selected realm layout. |
 | `realmNameMaxLength` | `80` | Maximum sanitized realm folder name length. |
 | `startWithWindows` | `false` | Tray-controlled HKCU Run startup setting. |
 
@@ -34,6 +38,25 @@ Current config version: `4`.
 | `iconLayoutSwitchRestoreDelayMs` | `1400` | Wait time after virtual desktop/folder switch before restoring icons. |
 | `iconLayoutRestoreRetryCount` | `2` | Number of restore attempts after a switch. Strict range: `1` to `5`. |
 | `iconLayoutRestoreRetryDelayMs` | `450` | Delay between restore retry attempts. |
+
+## First-run Desktop import settings
+
+Since v0.5.7, new configurations can show a first-run wizard before DeskRealm redirects the Desktop to a realm. The wizard can import the currently visible Windows Desktop into a selected virtual desktop realm.
+
+Relevant settings:
+
+```json
+{
+  "initialDesktopImportPromptEnabled": true,
+  "initialDesktopImportPromptCompleted": false,
+  "initialDesktopImportMoveFiles": true,
+  "initialDesktopImportSaveLayout": true
+}
+```
+
+Upgrade behavior is intentionally conservative: existing configs migrated to version `5` are marked with `initialDesktopImportPromptCompleted: true`, so users who already run DeskRealm are not surprised by an onboarding prompt after an update.
+
+The import operation is strict. It skips `desktop.ini` and DeskRealm's own realms root, and it refuses target filename conflicts instead of silently overwriting or merging files.
 
 ## Quiet icon persistence model
 
