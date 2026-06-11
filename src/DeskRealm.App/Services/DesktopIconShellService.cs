@@ -108,8 +108,9 @@ internal sealed class DesktopIconShellService
                 pidlsToFree.Add(pidl);
             }
 
-            var restored = 0;
             var missing = new List<string>();
+            var pidlsToPosition = new List<IntPtr>();
+            var pointsToPosition = new List<NativePoint>();
 
             foreach (var saved in savedPositions)
             {
@@ -119,11 +120,19 @@ internal sealed class DesktopIconShellService
                     continue;
                 }
 
-                var pidlArray = new[] { pidl };
-                var pointArray = new[] { new NativePoint(saved.X, saved.Y) };
-                var hr = view.SelectAndPositionItems(1, pidlArray, pointArray, ShellConstants.SVSI_POSITIONITEM);
-                ThrowIfFailed(hr, $"IFolderView.SelectAndPositionItems('{saved.DisplayName}', {saved.X}, {saved.Y})");
-                restored++;
+                pidlsToPosition.Add(pidl);
+                pointsToPosition.Add(new NativePoint(saved.X, saved.Y));
+            }
+
+            var restored = pidlsToPosition.Count;
+            if (restored > 0)
+            {
+                var hr = view.SelectAndPositionItems(
+                    (uint)restored,
+                    pidlsToPosition.ToArray(),
+                    pointsToPosition.ToArray(),
+                    ShellConstants.SVSI_POSITIONITEM);
+                ThrowIfFailed(hr, $"IFolderView.SelectAndPositionItems(batch, {restored} icon(s))");
             }
 
             if (missing.Count > 0)
@@ -136,7 +145,7 @@ internal sealed class DesktopIconShellService
                 _logger.Warn("Icon layout restore applied to 0 icon. Layout file kept, no fallback layout used.");
             }
 
-            _logger.Info($"Icon layout restore phase: restored {restored}/{savedPositions.Count} positions.");
+            _logger.Info($"Icon layout restore phase: batch-restored {restored}/{savedPositions.Count} positions.");
             return restored;
         }
         finally

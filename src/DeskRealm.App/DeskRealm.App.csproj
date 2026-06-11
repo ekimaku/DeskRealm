@@ -9,7 +9,7 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>DeskRealm.App</AssemblyName>
     <RootNamespace>DeskRealm.App</RootNamespace>
-    <Version>0.5.3</Version>
+    <Version>0.5.4</Version>
     <Authors>Ayahua</Authors>
     <Company>Ayahua</Company>
     <Copyright>Copyright (c) 2026 Ayahua</Copyright>

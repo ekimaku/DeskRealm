@@ -18,6 +18,12 @@ internal sealed class DesktopSwitchService
     private string? _lastDisplayTopologyKey;
     private DateTimeOffset _lastDisplayTopologyChangedAt = DateTimeOffset.MinValue;
     private bool _displayTopologyRestorePending;
+    private Guid? _pendingIconRestoreDesktopId;
+    private string? _pendingIconRestoreDesktopName;
+    private string? _pendingIconRestoreRealmPath;
+    private string? _pendingIconRestoreRealmName;
+    private DateTimeOffset _pendingIconRestoreReadyAt = DateTimeOffset.MinValue;
+    private string? _pendingIconRestoreReason;
     private bool _iconLayoutsDisabledForSession;
     private string? _iconLayoutsDisabledReason;
 
@@ -82,6 +88,7 @@ internal sealed class DesktopSwitchService
             _logger.Info("Icon layout background autosave disabled. Layouts are saved on desktop switch, manual save, and exit restore.");
         }
         _logger.Info($"Icon layout worker timeout: {Config.IconLayoutWorkerTimeoutMs} ms");
+        _logger.Info($"Icon layout delayed switch restore: delay={Config.IconLayoutSwitchRestoreDelayMs} ms, retries={Config.IconLayoutRestoreRetryCount}, retryDelay={Config.IconLayoutRestoreRetryDelayMs} ms");
         _logger.Info($"Desktop hotkeys: {Config.DesktopHotkeysEnabled} / {string.Join(", ", Config.DesktopHotkeys.Select(p => $"#{p.Key}={p.Value}"))}");
         _logger.Info($"Hotkey switch timing: initial={Config.HotkeyInitialDelayMs} ms, step={Config.HotkeySwitchStepDelayMs} ms, settle={Config.HotkeySwitchSettleTimeoutMs} ms");
     }
@@ -109,6 +116,7 @@ internal sealed class DesktopSwitchService
             string.Equals(currentKnownDesktop, realmPath, StringComparison.OrdinalIgnoreCase))
         {
             RestoreIconLayoutAfterDisplayTopologySettled(current, realmPath);
+            TryRestorePendingIconLayout(current, realmPath, currentKnownDesktop, "stable-tick");
             return;
         }
 
@@ -253,6 +261,7 @@ internal sealed class DesktopSwitchService
 
         _knownFolder.SetDesktopPath(original);
         _shellRefresh.RefreshDesktop(original);
+        ClearPendingIconRestore();
         _lastDesktopId = null;
         _lastSwitchAt = DateTimeOffset.Now;
         _lastMessage = $"Desktop original restauré : {original}";
@@ -338,7 +347,7 @@ internal sealed class DesktopSwitchService
 
         _knownFolder.SetDesktopPath(realmPath);
         _shellRefresh.RefreshDesktop(realmPath);
-        RestoreIconLayoutForDesktop(desktop, realmPath);
+        ScheduleIconLayoutRestore(desktop, realmPath, "switch");
 
         _lastDesktopId = desktop.Id;
         _lastSwitchAt = DateTimeOffset.Now;
@@ -587,6 +596,11 @@ internal sealed class DesktopSwitchService
             return;
         }
 
+        if (IsIconLayoutSwitchRestorePending(reason))
+        {
+            return;
+        }
+
         if (!TryFindAssignmentByRealmPath(knownDesktopPath, out var desktopId, out var realmName))
         {
             _logger.Info($"Icon layout {reason} skipped: active Desktop is not an assigned DeskRealm realm ({knownDesktopPath}).");
@@ -640,7 +654,89 @@ internal sealed class DesktopSwitchService
             "Attends que DeskRealm ait terminé le switch, puis utilise Save icon layout now depuis le realm actif.");
     }
 
-    private void RestoreIconLayoutForDesktop(VirtualDesktopInfo desktop, string realmPath)
+    private void ScheduleIconLayoutRestore(VirtualDesktopInfo desktop, string realmPath, string reason)
+    {
+        if (!Config.IconLayoutPersistenceEnabled)
+        {
+            return;
+        }
+
+        var realmName = Path.GetFileName(realmPath);
+        var delayMs = Math.Max(0, Config.IconLayoutSwitchRestoreDelayMs);
+        _pendingIconRestoreDesktopId = desktop.Id;
+        _pendingIconRestoreDesktopName = desktop.Name;
+        _pendingIconRestoreRealmPath = realmPath;
+        _pendingIconRestoreRealmName = realmName;
+        _pendingIconRestoreReadyAt = DateTimeOffset.Now.AddMilliseconds(delayMs);
+        _pendingIconRestoreReason = reason;
+        _logger.Info($"Icon layout restore scheduled after switch: {realmName} {desktop.Id:B}, delay={delayMs} ms, reason={reason}.");
+    }
+
+    private bool IsIconLayoutSwitchRestorePending(string reason)
+    {
+        if (!_pendingIconRestoreDesktopId.HasValue)
+        {
+            return false;
+        }
+
+        var remainingMs = (_pendingIconRestoreReadyAt - DateTimeOffset.Now).TotalMilliseconds;
+        _logger.Info(
+            $"Icon layout {reason} skipped: switch restore pending for '{_pendingIconRestoreRealmName}' " +
+            $"{_pendingIconRestoreDesktopId.Value:B}; restore in {Math.Max(0, remainingMs):0} ms. " +
+            "Skipping save to avoid capturing transient icons from the previous realm.");
+        return true;
+    }
+
+    private void TryRestorePendingIconLayout(VirtualDesktopInfo current, string realmPath, string currentKnownDesktop, string reason)
+    {
+        if (!_pendingIconRestoreDesktopId.HasValue)
+        {
+            return;
+        }
+
+        if (current.Id != _pendingIconRestoreDesktopId.Value)
+        {
+            _logger.Info(
+                $"Pending icon restore kept waiting ({reason}): current desktop is {current.Name} {current.Id:B}, " +
+                $"expected {_pendingIconRestoreDesktopName} {_pendingIconRestoreDesktopId.Value:B}.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_pendingIconRestoreRealmPath) ||
+            !PathsEqual(currentKnownDesktop, _pendingIconRestoreRealmPath) ||
+            !PathsEqual(realmPath, _pendingIconRestoreRealmPath))
+        {
+            _logger.Info(
+                $"Pending icon restore kept waiting ({reason}): Desktop known folder not settled on target realm yet. " +
+                $"Known={currentKnownDesktop}, target={_pendingIconRestoreRealmPath}.");
+            return;
+        }
+
+        var remainingMs = (_pendingIconRestoreReadyAt - DateTimeOffset.Now).TotalMilliseconds;
+        if (remainingMs > 0)
+        {
+            _logger.Info($"Pending icon restore kept waiting ({reason}): Explorer settle delay still active ({remainingMs:0} ms remaining).");
+            return;
+        }
+
+        var pendingRealmPath = _pendingIconRestoreRealmPath;
+        var pendingReason = _pendingIconRestoreReason ?? reason;
+
+        ClearPendingIconRestore();
+        RestoreIconLayoutForDesktop(current, pendingRealmPath, $"pending-{pendingReason}");
+    }
+
+    private void ClearPendingIconRestore()
+    {
+        _pendingIconRestoreDesktopId = null;
+        _pendingIconRestoreDesktopName = null;
+        _pendingIconRestoreRealmPath = null;
+        _pendingIconRestoreRealmName = null;
+        _pendingIconRestoreReadyAt = DateTimeOffset.MinValue;
+        _pendingIconRestoreReason = null;
+    }
+
+    private void RestoreIconLayoutForDesktop(VirtualDesktopInfo desktop, string realmPath, string reason = "auto-restore")
     {
         if (!Config.IconLayoutPersistenceEnabled)
         {
@@ -649,7 +745,7 @@ internal sealed class DesktopSwitchService
 
         if (_iconLayoutsDisabledForSession)
         {
-            _logger.Warn($"Icon layout auto-restore skipped: feature disabled for this session. Reason: {_iconLayoutsDisabledReason}");
+            _logger.Warn($"Icon layout {reason} skipped: feature disabled for this session. Reason: {_iconLayoutsDisabledReason}");
             return;
         }
 
@@ -659,14 +755,25 @@ internal sealed class DesktopSwitchService
         }
 
         var realmName = Path.GetFileName(realmPath);
+        var attempts = Math.Clamp(Config.IconLayoutRestoreRetryCount, 1, 5);
         try
         {
-            _iconLayouts.Restore(desktop.Id, realmName, Config.IconLayoutWorkerTimeoutMs);
+            for (var attempt = 1; attempt <= attempts; attempt++)
+            {
+                _iconLayouts.Restore(desktop.Id, realmName, Config.IconLayoutWorkerTimeoutMs);
+                _logger.Info($"Icon layout {reason} restore attempt {attempt}/{attempts}: {realmName} {desktop.Id:B}.");
+
+                if (attempt < attempts && Config.IconLayoutRestoreRetryDelayMs > 0)
+                {
+                    Thread.Sleep(Config.IconLayoutRestoreRetryDelayMs);
+                }
+            }
+
             _displayTopologyRestorePending = false;
         }
         catch (Exception ex)
         {
-            DisableIconLayoutsForSession("auto-restore", ex);
+            DisableIconLayoutsForSession(reason, ex);
         }
     }
 

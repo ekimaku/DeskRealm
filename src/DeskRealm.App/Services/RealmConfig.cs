@@ -5,7 +5,7 @@ namespace DeskRealm.App.Services;
 internal sealed class RealmConfig
 {
     [JsonPropertyName("version")]
-    public int Version { get; set; } = 3;
+    public int Version { get; set; } = 4;
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
@@ -45,6 +45,15 @@ internal sealed class RealmConfig
 
     [JsonPropertyName("iconLayoutDisplayTopologySettleDelayMs")]
     public int IconLayoutDisplayTopologySettleDelayMs { get; set; } = 1200;
+
+    [JsonPropertyName("iconLayoutSwitchRestoreDelayMs")]
+    public int IconLayoutSwitchRestoreDelayMs { get; set; } = 1400;
+
+    [JsonPropertyName("iconLayoutRestoreRetryCount")]
+    public int IconLayoutRestoreRetryCount { get; set; } = 2;
+
+    [JsonPropertyName("iconLayoutRestoreRetryDelayMs")]
+    public int IconLayoutRestoreRetryDelayMs { get; set; } = 450;
 
 
     [JsonPropertyName("desktopHotkeysEnabled")]

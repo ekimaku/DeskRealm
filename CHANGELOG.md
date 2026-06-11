@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.4 — Deferred switch restore and batched icon placement
+
+- Deferred icon layout restore after a desktop switch so Explorer has time to finish showing the target realm before DeskRealm moves icons.
+- Added a pending-restore save guard that refuses icon saves while a switch restore is waiting, preventing transient previous-realm icons from contaminating the target realm layout.
+- Added restore retries after switch to stabilize icons if Explorer reflows shortly after the first placement pass.
+- Changed icon restore to position all matching icons in a single batched `IFolderView.SelectAndPositionItems` call instead of moving icons one by one.
+- Added config migration v4 for switch restore delay and retry settings.
+
 ## v0.5.3 — Display topology aware icon layouts
 
 - Added display topology variants for icon layouts, keyed by active monitor set, virtual bounds, resolution, orientation and effective DPI / scale.

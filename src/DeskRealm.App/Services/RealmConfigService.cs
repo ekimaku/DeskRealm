@@ -78,6 +78,27 @@ internal sealed class RealmConfigService
             _logger.Warn("Migration config v3 : garde topologie écran/DPI activée pour éviter les sauvegardes contaminées multi-écran/résolution/scale.");
         }
 
+        if (config.Version < 4)
+        {
+            if (config.IconLayoutSwitchRestoreDelayMs < 1400)
+            {
+                config.IconLayoutSwitchRestoreDelayMs = 1400;
+            }
+
+            if (config.IconLayoutRestoreRetryCount < 2)
+            {
+                config.IconLayoutRestoreRetryCount = 2;
+            }
+
+            if (config.IconLayoutRestoreRetryDelayMs < 450)
+            {
+                config.IconLayoutRestoreRetryDelayMs = 450;
+            }
+
+            config.Version = 4;
+            _logger.Warn("Migration config v4 : restauration layout icônes différée après switch pour laisser Explorer finir d'afficher le realm cible.");
+        }
+
         if (config.PollIntervalMs < 250)
         {
             throw new InvalidOperationException("pollIntervalMs est trop bas. Valeur minimale stricte : 250 ms.");
@@ -106,6 +127,21 @@ internal sealed class RealmConfigService
         if (config.IconLayoutDisplayTopologySettleDelayMs is < 0 or > 10000)
         {
             throw new InvalidOperationException("iconLayoutDisplayTopologySettleDelayMs invalide. Valeur stricte autorisée : 0 à 10000 ms.");
+        }
+
+        if (config.IconLayoutSwitchRestoreDelayMs is < 0 or > 10000)
+        {
+            throw new InvalidOperationException("iconLayoutSwitchRestoreDelayMs invalide. Valeur stricte autorisée : 0 à 10000 ms.");
+        }
+
+        if (config.IconLayoutRestoreRetryCount is < 1 or > 5)
+        {
+            throw new InvalidOperationException("iconLayoutRestoreRetryCount invalide. Valeur stricte autorisée : 1 à 5.");
+        }
+
+        if (config.IconLayoutRestoreRetryDelayMs is < 0 or > 5000)
+        {
+            throw new InvalidOperationException("iconLayoutRestoreRetryDelayMs invalide. Valeur stricte autorisée : 0 à 5000 ms.");
         }
 
         if (config.IconLayoutAutoSaveIntervalMs is < 0 or > 300000)

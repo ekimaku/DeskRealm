@@ -100,3 +100,20 @@ DeskRealm is strict:
 - source and target both exist: stop with explicit conflict;
 - duplicate virtual desktop names: stop with explicit conflict;
 - invalid current virtual desktop GUID: stop with explicit error.
+
+
+## Icon layout switch stabilization
+
+`iconLayoutSwitchRestoreDelayMs` controls how long DeskRealm waits after changing the known Desktop folder before applying the target realm icon layout. This protects fast virtual desktop jumps where Explorer may briefly keep showing the previous realm icons.
+
+`iconLayoutRestoreRetryCount` and `iconLayoutRestoreRetryDelayMs` allow DeskRealm to re-apply the same layout shortly after the first restore, reducing icon drift when Explorer performs a late reflow.
+
+Recommended defaults:
+
+```json
+{
+  "iconLayoutSwitchRestoreDelayMs": 1400,
+  "iconLayoutRestoreRetryCount": 2,
+  "iconLayoutRestoreRetryDelayMs": 450
+}
+```
