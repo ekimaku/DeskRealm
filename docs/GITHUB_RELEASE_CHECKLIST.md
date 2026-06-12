@@ -44,24 +44,24 @@
 Preferred helper:
 
 ```powershell
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.7 -DryRun
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.7
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.8 -DryRun
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.8
 ```
 
 Manual fallback:
 
 ```powershell
 git add -A
-git commit -m "Release DeskRealm v0.5.7"
+git commit -m "Release DeskRealm v0.5.8"
 git push origin main
-git tag -a v0.5.7 -m "DeskRealm v0.5.7"
-git push origin v0.5.7
+git tag -a v0.5.8 -m "DeskRealm v0.5.8"
+git push origin v0.5.8
 ```
 
 The GitHub Actions workflow will build and attach:
 
-- `DeskRealm-0.5.7-win-x64-portable.zip`
-- `DeskRealm-0.5.7-win-x64-install-bundle.zip`
+- `DeskRealm-0.5.8-win-x64-portable.zip`
+- `DeskRealm-0.5.8-win-x64-install-bundle.zip`
 
 ## After release
 
@@ -71,7 +71,7 @@ The GitHub Actions workflow will build and attach:
 - [ ] Update release notes from `CHANGELOG.md` if the helper did not finish:
 
   ```powershell
-  gh release edit v0.5.7 --repo ekimaku/DeskRealm --title "DeskRealm v0.5.7" --notes-file ".release-work\release-notes-v0.5.7-from-changelog.md"
+  gh release edit v0.5.8 --repo ekimaku/DeskRealm --title "DeskRealm v0.5.8" --notes-file ".release-work\release-notes-v0.5.8-from-changelog.md"
   ```
 
 - [ ] Add screenshots/GIFs to the README if desired.

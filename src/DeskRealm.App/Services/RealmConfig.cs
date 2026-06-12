@@ -5,7 +5,7 @@ namespace DeskRealm.App.Services;
 internal sealed class RealmConfig
 {
     [JsonPropertyName("version")]
-    public int Version { get; set; } = 5;
+    public int Version { get; set; } = 6;
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
@@ -30,7 +30,7 @@ internal sealed class RealmConfig
     public bool InitialDesktopImportPromptCompleted { get; set; } = false;
 
     [JsonPropertyName("initialDesktopImportMoveFiles")]
-    public bool InitialDesktopImportMoveFiles { get; set; } = true;
+    public bool InitialDesktopImportMoveFiles { get; set; } = false;
 
     [JsonPropertyName("initialDesktopImportSaveLayout")]
     public bool InitialDesktopImportSaveLayout { get; set; } = true;

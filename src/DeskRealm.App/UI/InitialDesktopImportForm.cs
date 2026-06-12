@@ -7,11 +7,10 @@ namespace DeskRealm.App.UI;
 internal sealed class InitialDesktopImportForm : Form
 {
     private readonly ComboBox _desktopCombo;
-    private readonly CheckBox _moveFilesCheck;
     private readonly CheckBox _saveLayoutCheck;
 
     public Guid SelectedDesktopId { get; private set; }
-    public bool MoveFiles => _moveFilesCheck.Checked;
+    public bool LinkOriginalDesktop => true;
     public bool SaveLayout => _saveLayoutCheck.Checked;
 
     public InitialDesktopImportForm(IReadOnlyList<VirtualDesktopInfo> desktops, Guid currentDesktopId)
@@ -30,6 +29,7 @@ internal sealed class InitialDesktopImportForm : Form
         Width = 560;
         Height = 390;
 
+        var titleFontPrototype = SystemFonts.MessageBoxFont ?? Font ?? new Font(FontFamily.GenericSansSerif, 9F);
         var title = new Label
         {
             AutoSize = false,
@@ -38,7 +38,7 @@ internal sealed class InitialDesktopImportForm : Form
             Width = 510,
             Height = 42,
             Text = "Importer le Desktop Windows actuel dans DeskRealm ?",
-            Font = new Font(SystemFonts.MessageBoxFont, FontStyle.Bold)
+            Font = new Font(titleFontPrototype, FontStyle.Bold)
         };
 
         var intro = new Label
@@ -48,7 +48,7 @@ internal sealed class InitialDesktopImportForm : Form
             Top = 58,
             Width = 510,
             Height = 74,
-            Text = "DeskRealm peut transformer ton bureau Windows actuel en premier realm : les fichiers du Desktop original sont déplacés vers le realm choisi et la position actuelle des icônes est enregistrée comme layout initial.",
+            Text = "DeskRealm peut associer ton Desktop Windows actuel à un realm sans déplacer tes fichiers. Si DeskRealm est fermé, ton Desktop original reste intact et revient normalement.",
         };
 
         var desktopLabel = new Label
@@ -83,20 +83,10 @@ internal sealed class InitialDesktopImportForm : Form
         }
         _desktopCombo.SelectedIndex = selectedIndex;
 
-        _moveFilesCheck = new CheckBox
-        {
-            Left = 16,
-            Top = 208,
-            Width = 510,
-            Height = 24,
-            Checked = true,
-            Text = "Déplacer les fichiers/raccourcis du Desktop original vers ce realm"
-        };
-
         _saveLayoutCheck = new CheckBox
         {
             Left = 16,
-            Top = 236,
+            Top = 208,
             Width = 510,
             Height = 24,
             Checked = true,
@@ -107,10 +97,10 @@ internal sealed class InitialDesktopImportForm : Form
         {
             AutoSize = false,
             Left = 16,
-            Top = 272,
+            Top = 244,
             Width = 510,
-            Height = 38,
-            Text = "DeskRealm ne déplace pas son dossier Realms ni desktop.ini. En cas de conflit de nom dans le realm cible, l'import est refusé explicitement."
+            Height = 66,
+            Text = "Mode sûr : aucun fichier n'est déplacé. Le realm choisi pointe vers le Desktop Windows original. Les autres realms restent isolés dans le dossier DeskRealm."
         };
 
         var importButton = new Button
@@ -119,7 +109,7 @@ internal sealed class InitialDesktopImportForm : Form
             Top = 322,
             Width = 120,
             Height = 30,
-            Text = "Importer",
+            Text = "Associer",
             DialogResult = DialogResult.OK
         };
         importButton.Click += (_, _) =>
@@ -148,7 +138,6 @@ internal sealed class InitialDesktopImportForm : Form
         Controls.Add(intro);
         Controls.Add(desktopLabel);
         Controls.Add(_desktopCombo);
-        Controls.Add(_moveFilesCheck);
         Controls.Add(_saveLayoutCheck);
         Controls.Add(warning);
         Controls.Add(importButton);

@@ -98,9 +98,9 @@ Desktop icon Shell/COM interop is isolated in a worker process. If the Shell vie
 | Logs | `%LOCALAPPDATA%\DeskRealm\logs\deskrealm.log` |
 | Realm folders | Default: `%USERPROFILE%\Desktop\DeskRealm\...` |
 
-## First-run Desktop import
+## First-run Desktop association
 
-Since v0.5.7, new configurations can show an import wizard before DeskRealm performs its first automatic Desktop folder switch.
+Since v0.5.8, new configurations can show an association wizard before DeskRealm performs its first automatic Desktop folder switch.
 
 The flow is intentionally early:
 

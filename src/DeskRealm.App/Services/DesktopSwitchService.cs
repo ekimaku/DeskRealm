@@ -231,11 +231,18 @@ internal sealed class DesktopSwitchService
         _logger.Info("Initial Desktop import skipped by user.");
     }
 
-    public void ImportOriginalDesktopToVirtualDesktop(Guid targetDesktopId, bool moveFiles, bool saveLayout)
+    public void ImportOriginalDesktopToVirtualDesktop(Guid targetDesktopId, bool linkOriginalDesktop, bool saveLayout)
     {
         if (_config is null)
         {
             Initialize();
+        }
+
+        if (!linkOriginalDesktop)
+        {
+            throw new InvalidOperationException(
+                "Import Desktop initial refusé : DeskRealm ne déplace plus les fichiers du Desktop original. " +
+                "Le mode supporté est l'association du Desktop original à un realm.");
         }
 
         var originalDesktop = Config.OriginalDesktopPath
@@ -257,35 +264,33 @@ internal sealed class DesktopSwitchService
         var targetDesktop = _virtualDesktop.GetVirtualDesktops().FirstOrDefault(d => d.Id == targetDesktopId)
             ?? throw new InvalidOperationException($"Bureau virtuel cible introuvable : {targetDesktopId:B}");
 
-        var targetRealmPath = ResolveRealmPath(targetDesktop, createIfMissing: true);
-        var targetRealmName = Path.GetFileName(targetRealmPath);
+        EnsureOriginalDesktopNotAssignedToAnotherDesktop(targetDesktop.Id, originalDesktop);
 
-        if (PathsEqual(originalDesktop, targetRealmPath))
-        {
-            throw new InvalidOperationException("Import Desktop initial refusé : le realm cible pointe déjà vers le Desktop original.");
-        }
+        var targetKey = targetDesktop.Id.ToString("B");
+        var previousAssignment = Config.Assignments.TryGetValue(targetKey, out var previous)
+            ? previous
+            : string.Empty;
 
-        EnsureInitialImportCanMove(originalDesktop, targetRealmPath, moveFiles);
+        Config.Assignments[targetKey] = originalDesktop;
+        Config.InitialDesktopImportPromptCompleted = true;
+        Config.InitialDesktopImportMoveFiles = false;
+        Config.InitialDesktopImportSaveLayout = saveLayout;
+        _configService.Save(Config);
+
+        var targetRealmName = GetAssignmentDisplayName(originalDesktop);
 
         EnsureIconLayoutsNotDisabledForSession();
         if (saveLayout && Config.IconLayoutPersistenceEnabled)
         {
             _iconLayouts.Save(targetDesktop.Id, targetRealmName, Config.IconLayoutWorkerTimeoutMs);
-            _logger.Info($"Initial Desktop import layout saved before file move: {targetRealmName} {targetDesktop.Id:B}.");
+            _logger.Info($"Initial Desktop import layout saved for linked original Desktop: {targetRealmName} {targetDesktop.Id:B}.");
         }
 
-        var movedCount = moveFiles ? MoveInitialDesktopItems(originalDesktop, targetRealmPath) : 0;
-
-        Config.InitialDesktopImportPromptCompleted = true;
-        Config.InitialDesktopImportMoveFiles = moveFiles;
-        Config.InitialDesktopImportSaveLayout = saveLayout;
-        _configService.Save(Config);
-
         _lastDesktopId = null;
-        _lastMessage = moveFiles
-            ? $"Desktop initial importé vers {targetRealmName} ({movedCount} élément(s))."
-            : $"Layout Desktop initial enregistré pour {targetRealmName}.";
-        _logger.Info($"Initial Desktop import completed: target={targetRealmName} {targetDesktop.Id:B}, moveFiles={moveFiles}, moved={movedCount}, saveLayout={saveLayout}.");
+        _lastMessage = $"Desktop original associé à {targetDesktop.Name} sans déplacement de fichiers.";
+        _logger.Info(
+            $"Initial Desktop import completed: target={targetDesktop.Name} {targetDesktop.Id:B}, " +
+            $"mode=link-original-desktop, original={originalDesktop}, previousAssignment={previousAssignment}, saveLayout={saveLayout}.");
     }
 
     public void SaveIconLayoutNow()
@@ -550,6 +555,16 @@ internal sealed class DesktopSwitchService
             Config.Assignments[key] = realmName;
             _configService.Save(Config);
             _logger.Info($"Realm assignment created: {desktop.Name} {key} -> {realmName}");
+        }
+
+        if (IsAbsoluteRealmAssignment(realmName))
+        {
+            if (!Directory.Exists(realmName))
+            {
+                throw new DirectoryNotFoundException($"Realm externe absent : {realmName}");
+            }
+
+            return realmName;
         }
 
         if (Config.SyncRealmNamesWithVirtualDesktopNames)
@@ -966,7 +981,7 @@ internal sealed class DesktopSwitchService
     {
         foreach (var assignment in Config.Assignments)
         {
-            var candidatePath = Path.Combine(Config.RealmsRoot!, assignment.Value);
+            var candidatePath = ResolveAssignmentToPath(assignment.Value);
             if (!PathsEqual(path, candidatePath))
             {
                 continue;
@@ -977,13 +992,60 @@ internal sealed class DesktopSwitchService
                 throw new InvalidOperationException($"Assignment GUID invalide dans la config : {assignment.Key}");
             }
 
-            realmName = assignment.Value;
+            realmName = GetAssignmentDisplayName(assignment.Value);
             return true;
         }
 
         desktopId = Guid.Empty;
         realmName = string.Empty;
         return false;
+    }
+
+    private string ResolveAssignmentToPath(string assignment)
+    {
+        return IsAbsoluteRealmAssignment(assignment)
+            ? assignment
+            : Path.Combine(Config.RealmsRoot!, assignment);
+    }
+
+    private static bool IsAbsoluteRealmAssignment(string assignment)
+    {
+        return !string.IsNullOrWhiteSpace(assignment) && Path.IsPathFullyQualified(assignment);
+    }
+
+    private string GetAssignmentDisplayName(string assignment)
+    {
+        if (!IsAbsoluteRealmAssignment(assignment))
+        {
+            return assignment;
+        }
+
+        var original = Config.OriginalDesktopPath;
+        if (!string.IsNullOrWhiteSpace(original) && PathsEqual(assignment, original))
+        {
+            return "OriginalDesktop";
+        }
+
+        return Path.GetFileName(assignment.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+    }
+
+    private void EnsureOriginalDesktopNotAssignedToAnotherDesktop(Guid currentDesktopId, string originalDesktop)
+    {
+        var currentKey = currentDesktopId.ToString("B");
+        foreach (var assignment in Config.Assignments)
+        {
+            if (string.Equals(assignment.Key, currentKey, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (IsAbsoluteRealmAssignment(assignment.Value) && PathsEqual(assignment.Value, originalDesktop))
+            {
+                throw new InvalidOperationException(
+                    "Import Desktop initial refusé : le Desktop original est déjà associé à un autre bureau virtuel. " +
+                    $"Assignment existante : {assignment.Key} -> {assignment.Value}.");
+            }
+        }
     }
 
     private void EnsureIconLayoutPersistenceEnabled()
@@ -1007,7 +1069,7 @@ internal sealed class DesktopSwitchService
     private string CreateLegacyRealmName(int desktopNumber)
     {
         var realmName = $"D{desktopNumber}";
-        while (Config.Assignments.Values.Any(v => string.Equals(v, realmName, StringComparison.OrdinalIgnoreCase)))
+        while (Config.Assignments.Values.Any(v => !IsAbsoluteRealmAssignment(v) && string.Equals(v, realmName, StringComparison.OrdinalIgnoreCase)))
         {
             realmName = $"D{Config.NextRealmNumber++}";
         }
@@ -1024,6 +1086,7 @@ internal sealed class DesktopSwitchService
     {
         var existing = Config.Assignments.FirstOrDefault(pair =>
             !string.Equals(pair.Key, currentKey, StringComparison.OrdinalIgnoreCase) &&
+            !IsAbsoluteRealmAssignment(pair.Value) &&
             string.Equals(pair.Value, realmName, StringComparison.OrdinalIgnoreCase));
 
         if (!string.IsNullOrWhiteSpace(existing.Key))
@@ -1044,11 +1107,13 @@ internal sealed class DesktopSwitchService
         return string.Join(Environment.NewLine, desktops.Select(desktop =>
         {
             var key = desktop.Id.ToString("B");
-            var realmName = Config.Assignments.TryGetValue(key, out var assignment) ? assignment : "—";
+            var rawAssignment = Config.Assignments.TryGetValue(key, out var assignment) ? assignment : "—";
+            var realmName = rawAssignment == "—" ? rawAssignment : GetAssignmentDisplayName(rawAssignment);
             var desiredName = Config.SyncRealmNamesWithVirtualDesktopNames
                 ? GetDesiredRealmFolderName(desktop)
                 : $"D{desktop.Number}";
-            return $"  #{desktop.Number} {desktop.Name} {key} -> {realmName} (desired: {desiredName})";
+            var assignmentKind = rawAssignment != "—" && IsAbsoluteRealmAssignment(rawAssignment) ? "external-path" : "managed-folder";
+            return $"  #{desktop.Number} {desktop.Name} {key} -> {realmName} ({assignmentKind}, desired: {desiredName})";
         }));
     }
 

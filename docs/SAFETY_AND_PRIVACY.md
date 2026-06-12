@@ -58,6 +58,6 @@ Before first use, back up important Desktop files. DeskRealm is designed not to 
 
 ## First-run import safety
 
-The v0.5.7 import wizard is the only DeskRealm flow that can intentionally move existing Desktop files into a realm folder. It requires explicit user confirmation, skips `desktop.ini` and DeskRealm's own realm root, and refuses target name conflicts instead of overwriting or merging silently.
+The v0.5.8 import wizard is the only DeskRealm flow that can intentionally associate the existing Desktop folder into a realm folder. It requires explicit user confirmation, skips `desktop.ini` and DeskRealm's own realm root, and refuses target name conflicts instead of overwriting or merging silently.
 
 During normal operation, DeskRealm changes the Desktop Known Folder path and manages icon layouts, but it does not silently migrate Desktop files.

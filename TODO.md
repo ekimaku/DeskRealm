@@ -1,6 +1,6 @@
 # DeskRealm TODO
 
-## Current stable line: v0.5.7
+## Current stable line: v0.5.8
 
 - [x] Disable periodic icon polling to avoid busy-cursor flicker.
 - [x] Guard saves against cross-desktop contamination.
@@ -12,7 +12,7 @@
 - [x] Add Shell identity fallback for repeated icons/shortcuts across realms.
 - [x] Add first-run Desktop import wizard.
 - [x] Add config v5 migration so existing installs are not interrupted by the wizard.
-- [x] Update README/docs for v0.5.7 behavior.
+- [x] Update README/docs for v0.5.8 behavior.
 
 ## Suggested next versions
 

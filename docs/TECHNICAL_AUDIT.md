@@ -1,4 +1,4 @@
-# DeskRealm — Technical audit v0.5.7
+# DeskRealm — Technical audit v0.5.8
 
 ## Objectif produit
 
@@ -6,7 +6,7 @@ DeskRealm transforme les bureaux virtuels Windows en espaces de travail réellem
 
 La ligne v0.5.1 → v0.5.6 a stabilisé la partie la plus sensible : la persistance des positions d'icônes Desktop dans des conditions réelles multi-écrans, résolution variable, DPI / mise à l'échelle et raccourcis répétés sur plusieurs realms.
 
-La v0.5.7 ajoute la couche onboarding : un assistant de premier lancement permet d'importer le Desktop Windows initial dans un realm choisi, avec déplacement optionnel des fichiers et sauvegarde optionnelle du layout visible.
+La v0.5.8 ajoute la couche onboarding : un assistant de premier lancement permet d'importer le Desktop Windows initial dans un realm choisi, avec déplacement optionnel des fichiers et sauvegarde optionnelle du layout visible.
 
 ## Architecture validée
 
@@ -57,7 +57,7 @@ La v0.5.7 ajoute la couche onboarding : un assistant de premier lancement permet
 - Retry ciblé sur les icônes qui n'ont pas bougé.
 - Logs explicites des icônes encore non conformes.
 
-### v0.5.7 — First-run Desktop import wizard
+### v0.5.8 — First-run Desktop import wizard
 
 - Nouveau flux de premier lancement avant le premier switch automatique.
 - Choix du bureau virtuel cible pour le Desktop Windows existant.

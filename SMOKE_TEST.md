@@ -1,11 +1,11 @@
-# DeskRealm v0.5.7 — Smoke test
+# DeskRealm v0.5.8 — Smoke test
 
 This package may be prepared outside a full Windows .NET Desktop SDK runtime, so static checks and Windows runtime checks are separated.
 
 ## Static package checks
 
 - [x] Root ZIP folder is `DeskRealm/`.
-- [x] Project version is `0.5.7`.
+- [x] Project version is `0.5.8`.
 - [x] Config version is `5`.
 - [x] Layout model version is `3`.
 - [x] Background icon autosave default is `false`.
@@ -16,9 +16,9 @@ This package may be prepared outside a full Windows .NET Desktop SDK runtime, so
 - [x] `InitialDesktopImportForm` exists.
 - [x] `LICENSE` exists and contains Apache-2.0.
 - [x] `NOTICE` exists.
-- [x] `CITATION.cff` exists and points to version `0.5.7`.
-- [x] `README.md` documents v0.5.7 behavior.
-- [x] `CHANGELOG.md` includes `## v0.5.7` in a format accepted by the release helper.
+- [x] `CITATION.cff` exists and points to version `0.5.8`.
+- [x] `README.md` documents v0.5.8 behavior.
+- [x] `CHANGELOG.md` includes `## v0.5.8` in a format accepted by the release helper.
 - [x] `docs/CONFIGURATION.md` documents config v5 and first-run import.
 - [x] `docs/ARCHITECTURE.md` documents topology variants and save guards.
 - [x] `.gitignore` exists and excludes `.local-tools/` and `.release-work/`.

@@ -27,7 +27,8 @@ internal sealed class RealmConfigService
                 RealmsRoot = Path.Combine(currentDesktopPath, "DeskRealm"),
                 NextRealmNumber = 1,
                 Enabled = true,
-                InitialDesktopImportPromptCompleted = false
+                InitialDesktopImportPromptCompleted = false,
+                InitialDesktopImportMoveFiles = false
             };
 
             Save(initial);
@@ -110,6 +111,13 @@ internal sealed class RealmConfigService
             config.InitialDesktopImportSaveLayout = true;
             config.Version = 5;
             _logger.Warn("Migration config v5 : assistant d'import du Desktop initial disponible uniquement pour les nouvelles installations.");
+        }
+
+        if (config.Version < 6)
+        {
+            config.InitialDesktopImportMoveFiles = false;
+            config.Version = 6;
+            _logger.Warn("Migration config v6 : import Desktop initial sécurisé. DeskRealm associe le Desktop original sans déplacer les fichiers.");
         }
 
         if (config.PollIntervalMs < 250)

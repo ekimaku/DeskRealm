@@ -6,7 +6,7 @@ DeskRealm stores its user configuration here:
 %APPDATA%\DeskRealm\deskrealm.config.json
 ```
 
-Current config version: `5`.
+Current config version: `6`.
 
 ## Main settings
 
@@ -19,7 +19,7 @@ Current config version: `5`.
 | `syncRealmNamesWithVirtualDesktopNames` | `true` | Uses Windows Task View names as realm folder names. |
 | `initialDesktopImportPromptEnabled` | `true` | Enables the first-run Desktop import wizard for new configs. |
 | `initialDesktopImportPromptCompleted` | `false` for new configs, migrated to `true` for upgrades | Prevents the wizard from interrupting existing users after upgrade. |
-| `initialDesktopImportMoveFiles` | `true` | Default wizard option to move current Desktop items into the selected realm. |
+| `initialDesktopImportMoveFiles` | `false` | Legacy compatibility flag. Since v0.5.8, DeskRealm does not move Desktop files during onboarding. |
 | `initialDesktopImportSaveLayout` | `true` | Default wizard option to save current icon positions as the selected realm layout. |
 | `realmNameMaxLength` | `80` | Maximum sanitized realm folder name length. |
 | `startWithWindows` | `false` | Tray-controlled HKCU Run startup setting. |
@@ -41,7 +41,7 @@ Current config version: `5`.
 
 ## First-run Desktop import settings
 
-Since v0.5.7, new configurations can show a first-run wizard before DeskRealm redirects the Desktop to a realm. The wizard can import the currently visible Windows Desktop into a selected virtual desktop realm.
+Since v0.5.8, new configurations can show a first-run wizard before DeskRealm redirects the Desktop to a realm. The wizard can associate the currently visible Windows Desktop folder with a selected virtual desktop realm without moving files.
 
 Relevant settings:
 
@@ -49,14 +49,14 @@ Relevant settings:
 {
   "initialDesktopImportPromptEnabled": true,
   "initialDesktopImportPromptCompleted": false,
-  "initialDesktopImportMoveFiles": true,
+  "initialDesktopImportMoveFiles": false,
   "initialDesktopImportSaveLayout": true
 }
 ```
 
-Upgrade behavior is intentionally conservative: existing configs migrated to version `5` are marked with `initialDesktopImportPromptCompleted: true`, so users who already run DeskRealm are not surprised by an onboarding prompt after an update.
+Upgrade behavior is intentionally conservative: existing configs migrated to version `6` are marked with `initialDesktopImportPromptCompleted: true`, so users who already run DeskRealm are not surprised by an onboarding prompt after an update.
 
-The import operation is strict. It skips `desktop.ini` and DeskRealm's own realms root, and it refuses target filename conflicts instead of silently overwriting or merging files.
+The association operation is strict. It does not move or merge files. It records the selected virtual desktop assignment as the original Desktop path and refuses duplicate original-Desktop assignments.
 
 ## Quiet icon persistence model
 

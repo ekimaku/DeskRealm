@@ -77,11 +77,11 @@ internal sealed class TrayAppContext : ApplicationContext
             {
                 _switchService.ImportOriginalDesktopToVirtualDesktop(
                     form.SelectedDesktopId,
-                    form.MoveFiles,
+                    form.LinkOriginalDesktop,
                     form.SaveLayout);
 
                 MessageBox.Show(
-                    "Desktop initial importé. DeskRealm va maintenant activer le realm correspondant au bureau virtuel courant.",
+                    "Desktop initial associé sans déplacer les fichiers. DeskRealm va maintenant activer le realm correspondant au bureau virtuel courant.",
                     "DeskRealm — import terminé",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);

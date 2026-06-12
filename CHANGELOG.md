@@ -1,13 +1,29 @@
 # Changelog
 
-Current stable: `v0.5.7`.
+Current stable: `v0.5.8`.
+
+## v0.5.8 — Safe first-run Desktop association
+
+### Fixed
+- Reworked first-run onboarding so DeskRealm no longer moves files from the original Windows Desktop into a managed realm folder.
+- The selected virtual desktop realm now points directly to the original Desktop folder, preserving the normal Desktop when DeskRealm is closed or disabled.
+- Added absolute-path realm assignments so a realm can safely use an existing external folder such as the original Desktop.
+- Prevented duplicate assignment of the original Desktop path to multiple virtual desktops.
+
+### Changed
+- The first-run wizard now describes the safe association model instead of file migration.
+- Config migration v6 disables the legacy `initialDesktopImportMoveFiles` flag.
+- Documentation, installation notes, safety notes and release process now describe the no-move onboarding model.
+
+### Safety
+- DeskRealm must not silently move user Desktop files during onboarding. Existing files remain in the original Desktop folder.
 
 ## v0.5.7 — First-run Desktop import wizard
 
 ### Added
 - Added a first-run Desktop import wizard for new installations.
 - The wizard can assign the current Windows Desktop to a chosen virtual desktop realm before the first automatic switch.
-- The wizard can optionally move existing Desktop files and shortcuts into the selected realm.
+- Superseded by v0.5.8: the wizard no longer moves Desktop files; it now links the selected realm to the original Desktop path.
 - The wizard can optionally save the currently visible icon positions as that realm's initial layout.
 - Added strict conflict checks for initial import: no silent overwrite, no hidden merge, and `desktop.ini` / DeskRealm's own realms root are skipped.
 - Added config version `5` with first-run import settings.

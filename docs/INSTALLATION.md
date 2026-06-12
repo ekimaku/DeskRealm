@@ -51,12 +51,12 @@ By default, uninstall preserves `%APPDATA%\DeskRealm` and `%LOCALAPPDATA%\DeskRe
 4. Use **Save icon layout now** once on each important realm if you are upgrading from a version older than v0.5.6, so layouts are refreshed with display-topology and Shell identity metadata.
 5. Test your normal monitor/resolution/DPI setup, then any known alternate setup such as one monitor off or a game resolution.
 
-DeskRealm migrates config automatically. Existing installs are marked as first-run-import completed so the v0.5.7 wizard does not interrupt upgrades. Old icon layout files only gain the richest v0.5.6+ identity metadata after they are saved again.
+DeskRealm migrates config automatically. Existing installs are marked as first-run-import completed so the v0.5.8 wizard does not interrupt upgrades. Old icon layout files only gain the richest v0.5.6+ identity metadata after they are saved again.
 
 
 ## First run on a new installation
 
-On a fresh v0.5.7 installation, DeskRealm can offer to import the current Windows Desktop before the first automatic realm switch.
+On a fresh v0.5.8 installation, DeskRealm can offer to associate the current Windows Desktop before the first automatic realm switch.
 
 The wizard lets you choose:
 
