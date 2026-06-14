@@ -4,7 +4,9 @@
 
 Each Windows virtual desktop gets its own Desktop folder, its own icon layout, and optional direct hotkeys. Instead of every `Win + Tab` workspace showing the same Desktop clutter, DeskRealm redirects the current user's Windows Desktop Known Folder to the folder assigned to the active virtual desktop.
 
-> Example: `Personal`, `Work`, `Dev`, `Music` and `Gaming` can each display their own Desktop icons and shortcuts.
+> Example: `Personnal`, `Work`, `Dev`, `Music`, `Gaming` can each display their own Desktop icons and shortcuts.
+
+![DeskRealm demo](https://github.com/user-attachments/assets/02220d35-f28d-44bc-8a66-9394d268cec9)
 
 ## Status
 
