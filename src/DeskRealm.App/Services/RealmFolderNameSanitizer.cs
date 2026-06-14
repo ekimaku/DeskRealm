@@ -13,7 +13,7 @@ internal static class RealmFolderNameSanitizer
     {
         if (maxLength is < 16 or > 120)
         {
-            throw new InvalidOperationException("realmNameMaxLength invalide. Valeur stricte autorisée : 16 à 120 caractères.");
+            throw new InvalidOperationException("realmNameMaxLength invalid. Strict allowed value: 16 to 120 characters.");
         }
 
         var source = string.IsNullOrWhiteSpace(virtualDesktopName)
@@ -32,7 +32,7 @@ internal static class RealmFolderNameSanitizer
         if (string.IsNullOrWhiteSpace(sanitized))
         {
             throw new InvalidOperationException(
-                $"Le nom du bureau virtuel '{virtualDesktopName}' ne produit aucun nom de dossier valide.");
+                $"The virtual desktop name '{virtualDesktopName}' does not produce any valid folder name.");
         }
 
         if (sanitized.Length > maxLength)
@@ -43,7 +43,7 @@ internal static class RealmFolderNameSanitizer
         if (string.IsNullOrWhiteSpace(sanitized))
         {
             throw new InvalidOperationException(
-                $"Le nom du bureau virtuel '{virtualDesktopName}' est invalide après limitation à {maxLength} caractères.");
+                $"The virtual desktop name '{virtualDesktopName}' is invalid after trimming to {maxLength} characters.");
         }
 
         if (ReservedWindowsNames.Contains(sanitized))

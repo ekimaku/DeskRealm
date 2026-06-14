@@ -1,139 +1,80 @@
-# DeskRealm v0.5.8
+# DeskRealm v0.5.9
 
 **DeskRealm turns Windows virtual desktops into real, separated Desktop realms.**
 
 Each Windows virtual desktop gets its own Desktop folder, its own icon layout, and optional direct hotkeys. Instead of every `Win + Tab` workspace showing the same Desktop clutter, DeskRealm redirects the current user's Windows Desktop Known Folder to the folder assigned to the active virtual desktop.
 
-> Example: `Personnal`, `Work`, `Dev`, `Music`, `Gaming` can each display their own Desktop icons and shortcuts.
-
-![DeskRealm demo](https://github.com/user-attachments/assets/02220d35-f28d-44bc-8a66-9394d268cec9)
+> Example: `Personal`, `Work`, `Dev`, `Music` and `Gaming` can each display their own Desktop icons and shortcuts.
 
 ## Status
 
-DeskRealm is a personal open-source Windows utility. Version `v0.5.8` keeps the validated icon-layout engine and fixes first-run onboarding so the original Windows Desktop is linked to a chosen realm without moving user files.
+DeskRealm is a personal open-source Windows utility. Version `v0.5.9` builds on the safe `v0.5.8` first-run association model and adds a real user-facing UX layer: onboarding, settings, hotkey capture, layout/realm locks and layout variant management.
 
 DeskRealm intentionally touches the Windows Desktop Known Folder. Read the safety notes before running it, especially if your Desktop is synchronized by OneDrive.
 
-## Highlights in v0.5.8
+## Highlights in v0.5.9
 
-- Stable icon layouts across repeated shortcuts/icons on multiple realms.
-- Display-topology-aware layouts: active monitors, resolution, orientation, virtual bounds and DPI / scale are part of the saved layout context.
-- Deferred icon restore after desktop switches so Explorer has time to show the target realm before positions are applied.
-- Verified restore with retry for icons that do not move on the first Shell placement pass.
-- Shell identity fallback: exact PIDL matching is tried first, then human-readable Shell identity keys are used when Explorer exposes the same shortcut with a different PIDL.
-- Background icon polling is disabled by default to avoid periodic busy-cursor flicker.
-- First-run import wizard safely links the existing Windows Desktop folder to a selected realm without moving files, then can save its current icon layout.
+### Smoother first run
 
-## Features
+- New DeskRealm window available from the tray and by tray icon double-click.
+- Branded DeskRealm `DR` icon embedded in the compiled `.exe`, tray notification icon and main window.
+- The UI stays hidden during normal use, but opens automatically on fresh installs.
+- First-run onboarding explains how DeskRealm works before the first automatic Desktop switch.
+- The original Windows Desktop can be associated with one realm without moving files.
+- If association is skipped, DeskRealm creates `DeskRealm - Original Desktop.lnk` shortcuts inside managed realms so the old Desktop remains easy to find.
+
+### Modern tray-first UI
+
+- Closing the window with the cross hides it back to the tray.
+- **Quit DeskRealm** is the explicit app exit.
+- Main tray actions are also available from the UI: refresh, sync names, save/restore icon layout, restore original Desktop, startup toggle, open realms/config/logs and quit.
+- The old WinForms tab-strip look has been replaced with a dark/cyan DeskRealm shell, rounded cards, custom buttons, status pills and dark in-app chrome.
+
+### Hotkey capture
+
+- Hotkeys are captured directly from the UI field instead of typed as free-form text.
+- Click a field, hold one or two modifiers (`Win`, `Ctrl`, `Alt`, `Shift`), then press one main key.
+- Capture stops immediately on the first main key.
+- Releasing only modifiers cancels capture and restores the previous value.
+- Default desktop hotkeys now avoid `Win+Shift+W` and `Win+Shift+V`:
+  - Desktop 1: `Win+Shift+X`
+  - Desktop 2: `Win+Shift+C`
+  - Desktop 3: `Win+Shift+B`
+  - Desktop 4: `Win+Shift+N`
+
+### Icon Layout management
+
+- The **Icon Layout** view groups saved layouts by realm.
+- Child rows represent saved display-topology `variants` from each icon-layout JSON file.
+- Each variant row shows monitor working areas separately, using persisted `DisplayX.workingWidth` / `DisplayX.workingHeight` metadata.
+- The primary display is marked with `✅`.
+- Layouts, realms and exact layout variants can be locked from the UI.
+- Locked layouts protect existing icon positions from automatic overwrite while still allowing newly added icons to be captured once.
+- Manual overwrite of a locked layout requires explicit confirmation.
+- Stale saved variants can be removed with the confirmation-gated **Delete** action from the UI. Deleting a variant removes DeskRealm metadata only; it never deletes Desktop files or icons.
+
+### Clear pause semantics
+
+- **Enable realm switching automation** now means exactly that.
+- When disabled, DeskRealm does not switch realm folders automatically and ignores DeskRealm desktop hotkeys.
+- Pausing automation does not delete assignments, realm folders, icons, layouts or files.
+
+## Core features
 
 - Per-virtual-desktop Desktop folders.
-- Folder names synchronized from the names shown in Windows Task View / `Win + Tab`.
-- Existing realm folders are renamed, not duplicated, when the workspace name changes.
+- Folder names synchronized from Windows Task View / `Win + Tab` names.
+- Existing realm folders are renamed, not duplicated, when workspace names change.
 - Per-realm Desktop icon layout save/restore.
-- First-run Desktop association wizard for clean onboarding on new installations without moving files.
-- Per-display-topology icon layout variants for monitor, resolution, orientation and scale changes.
-- Guarded icon saves to prevent cross-desktop contamination during fast switches or display changes.
-- Configurable global hotkeys to jump to numbered desktops.
-- Optional startup with Windows from the tray menu.
-- Tray app with status, config, logs, restore, pause/resume, and manual sync actions.
-- Strict error handling: no silent fallback, no implicit file migration, no hidden merge.
+- Display-topology-aware icon layouts for monitor, resolution, orientation and DPI / scale changes.
+- Deferred and verified icon restore after switches.
+- Shell identity fallback for repeated shortcuts/icons across realms.
+- Global direct desktop hotkeys.
+- Tray-first runtime with an optional onboarding/settings window.
+- UI-controlled layout, realm and variant locks for protected icon positions.
+- Branded executable, tray and main-window icon.
+- Emergency restore script for the original Desktop path.
 
-## Default hotkeys
-
-```text
-Win+Shift+W -> Desktop 1
-Win+Shift+X -> Desktop 2
-Win+Shift+C -> Desktop 3
-Win+Shift+V -> Desktop 4
-Win+Shift+B -> Desktop 5
-Win+Shift+N -> Desktop 6
-```
-
-These are configurable in:
-
-```text
-%APPDATA%\DeskRealm\deskrealm.config.json
-```
-
-DeskRealm does not use an unofficial direct numbered virtual desktop switch API. It reads the current Windows virtual desktop order and sends repeated `Win+Ctrl+Left/Right` navigation steps until the target desktop is reached, then applies the Desktop folder/layout switch.
-
-## How it works
-
-DeskRealm combines several Windows mechanisms:
-
-- reads Windows virtual desktop GUIDs/order/names from Explorer registry state;
-- redirects the current user's Desktop Known Folder to the matching realm folder;
-- requests a Shell refresh so Explorer redraws the Desktop;
-- captures/restores Desktop icon positions through the supported Shell folder view API;
-- stores icon layouts per virtual desktop and per display topology;
-- avoids background Shell icon polling by default;
-- registers global hotkeys with `RegisterHotKey`;
-- optionally adds/removes an HKCU Run entry for startup.
-
-## Icon layout model
-
-Icon layouts are stored here:
-
-```text
-%APPDATA%\DeskRealm\icon-layouts\<virtual-desktop-guid>.json
-```
-
-Since v0.5.6, each file can contain multiple display-topology variants. This lets DeskRealm keep different valid layouts for situations such as:
-
-```text
-- two monitors active at normal resolution / scale
-- one monitor temporarily disconnected or asleep
-- a game changing resolution
-- Windows display scale / DPI changed
-- same shortcut visible on several realms at different positions
-```
-
-When saving/restoring icons, DeskRealm first matches icons by exact Shell PIDL-derived identity. If Explorer exposes the same visible shortcut with a changed PIDL, DeskRealm falls back to Shell display/parsing identity keys.
-
-
-## First-run Desktop association
-
-On a fresh install, DeskRealm can offer to associate the current Windows Desktop before the first automatic realm switch. The wizard can:
-
-- assign the current Desktop folder to a chosen virtual desktop realm;
-- keep existing Desktop files and shortcuts in place;
-- save the currently visible icon positions as that realm's initial layout.
-
-The association is intentionally strict: it records the selected realm as the original Desktop path and refuses duplicate original-Desktop assignments. No files are moved, copied, merged, or deleted. Existing upgraded installs do not show this wizard unexpectedly.
-
-## Default realm layout
-
-On first run, DeskRealm stores the current Desktop path as the restore path and creates:
-
-```text
-%USERPROFILE%\Desktop\DeskRealm\
-```
-
-With name sync enabled, folders are named from Windows Task View:
-
-```text
-%USERPROFILE%\Desktop\DeskRealm\Personnal
-%USERPROFILE%\Desktop\DeskRealm\Work
-%USERPROFILE%\Desktop\DeskRealm\Dev
-```
-
-If name sync is disabled, DeskRealm keeps legacy `D1`, `D2`, `D3`, `D4` style names.
-
-## Safety model
-
-DeskRealm is intentionally strict:
-
-- it does not move, delete, copy, or silently migrate existing Desktop files; the first-run wizard links the chosen realm to the original Desktop path instead;
-- it refuses OneDrive Desktop redirection by default;
-- it refuses duplicate virtual desktop names;
-- it refuses folder rename conflicts instead of merging folders;
-- it refuses invalid virtual desktop registry state;
-- it refuses icon saves while the active Windows virtual desktop and known Desktop realm are out of sync;
-- it refuses icon saves while display topology is settling;
-- it disables icon persistence for the current session if the isolated Shell icon worker fails, but keeps the core Desktop switching alive;
-- it provides an emergency restore script.
-
-## Important warning
+## Important safety note
 
 DeskRealm changes the current user's Windows Desktop Known Folder path while it runs. This is powerful, but it is not a casual visual overlay. Before testing:
 
@@ -158,7 +99,8 @@ For normal users, use the GitHub Release artifacts instead of building manually.
 1. Download `DeskRealm-<version>-win-x64-portable.zip` from the latest release.
 2. Extract it somewhere stable, for example `%LOCALAPPDATA%\Programs\DeskRealm`.
 3. Run `DeskRealm.App.exe`.
-4. Enable **Démarrer avec Windows** from the tray menu if desired.
+4. On a fresh config, complete the first-run DeskRealm window before the first automatic switch.
+5. Enable **Start with Windows** from the tray or UI if desired.
 
 ### Install bundle
 
@@ -184,6 +126,8 @@ Output:
 .\dist\DeskRealm\DeskRealm.App.exe
 ```
 
+The compiled executable embeds the DeskRealm `DR` icon from `src\DeskRealm.App\Assets\DeskRealm.ico`; the tray icon and main window use the same embedded icon.
+
 ## Run from source
 
 ```powershell
@@ -206,22 +150,6 @@ The script reads:
 
 and restores `originalDesktopPath`.
 
-## Tray menu
-
-- Status
-- Refresh now
-- Sync names now
-- Save icon layout now
-- Restore icon layout now
-- Reload hotkeys from config
-- Pause / Resume
-- Démarrer avec Windows
-- Open realms
-- Open config
-- Open logs
-- Restore original Desktop
-- Quit
-
 ## Configuration
 
 Config file:
@@ -230,52 +158,24 @@ Config file:
 %APPDATA%\DeskRealm\deskrealm.config.json
 ```
 
-Current config version: `6`.
+Current config version: `10`.
 
-Example:
+Key v0.5.9 fields:
 
 ```json
 {
-  "version": 6,
+  "version": 10,
   "enabled": true,
-  "pollIntervalMs": 750,
-  "restoreDesktopOnExit": true,
-  "rejectOneDriveDesktop": true,
-  "syncRealmNamesWithVirtualDesktopNames": true,
-  "initialDesktopImportPromptEnabled": true,
-  "initialDesktopImportPromptCompleted": false,
-  "initialDesktopImportMoveFiles": false,
-  "initialDesktopImportSaveLayout": true,
-  "realmNameMaxLength": 80,
-  "iconLayoutPersistenceEnabled": true,
-  "iconLayoutSettleDelayMs": 500,
-  "iconLayoutAutoSaveEnabled": false,
-  "iconLayoutAutoSaveIntervalMs": 60000,
-  "iconLayoutWorkerTimeoutMs": 8000,
-  "iconLayoutDisplayTopologyGuardEnabled": true,
-  "iconLayoutDisplayTopologySettleDelayMs": 1200,
-  "iconLayoutSwitchRestoreDelayMs": 1400,
-  "iconLayoutRestoreRetryCount": 2,
-  "iconLayoutRestoreRetryDelayMs": 450,
   "desktopHotkeysEnabled": true,
   "desktopHotkeys": {
-    "1": "Win+Shift+W",
-    "2": "Win+Shift+X",
-    "3": "Win+Shift+C",
-    "4": "Win+Shift+V",
-    "5": "Win+Shift+B",
-    "6": "Win+Shift+N"
+    "1": "Win+Shift+X",
+    "2": "Win+Shift+C",
+    "3": "Win+Shift+B",
+    "4": "Win+Shift+N"
   },
-  "hotkeyInitialDelayMs": 180,
-  "hotkeySwitchStepDelayMs": 160,
-  "hotkeySwitchSettleTimeoutMs": 3000,
-  "startWithWindows": false,
-  "originalDesktopPath": "C:\\Users\\<you>\\Desktop",
-  "realmsRoot": "C:\\Users\\<you>\\Desktop\\DeskRealm",
-  "nextRealmNumber": 5,
-  "assignments": {
-    "{00000000-0000-0000-0000-000000000000}": "Personnal"
-  }
+  "lockedIconLayouts": {},
+  "lockedRealms": {},
+  "lockedIconLayoutVariants": {}
 }
 ```
 
@@ -283,6 +183,9 @@ See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
 
 ## Documentation
 
+- [`CHANGELOG.md`](CHANGELOG.md)
+- [`docs/release-notes/v0.5.9.md`](docs/release-notes/v0.5.9.md)
+- [`docs/patch-notes/PATCH_NOTES_v0_5_9.md`](docs/patch-notes/PATCH_NOTES_v0_5_9.md)
 - [`docs/INSTALLATION.md`](docs/INSTALLATION.md)
 - [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)

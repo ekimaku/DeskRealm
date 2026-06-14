@@ -41,7 +41,7 @@ internal sealed class KeyboardInputService
         if (sent != (uint)inputs.Length)
         {
             var error = Marshal.GetLastWin32Error();
-            throw new InvalidOperationException($"SendInput a échoué pour Win+Ctrl+{arrowName}. Sent={sent}/{inputs.Length}, Win32Error={error}, INPUT cbSize={inputSize}.");
+            throw new InvalidOperationException($"SendInput failed pour Win+Ctrl+{arrowName}. Sent={sent}/{inputs.Length}, Win32Error={error}, INPUT cbSize={inputSize}.");
         }
     }
 

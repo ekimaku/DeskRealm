@@ -23,7 +23,7 @@ internal sealed class KnownFolderService
         try
         {
             return Marshal.PtrToStringUni(pathPtr)
-                ?? throw new InvalidOperationException("SHGetKnownFolderPath a renvoyé un chemin nul.");
+                ?? throw new InvalidOperationException("SHGetKnownFolderPath returned a null path.");
         }
         finally
         {
@@ -35,12 +35,12 @@ internal sealed class KnownFolderService
     {
         if (string.IsNullOrWhiteSpace(newPath))
         {
-            throw new ArgumentException("Le nouveau chemin Desktop est vide.", nameof(newPath));
+            throw new ArgumentException("The new Desktop path is empty.", nameof(newPath));
         }
 
         if (!Directory.Exists(newPath))
         {
-            throw new DirectoryNotFoundException($"Le dossier Desktop cible n'existe pas : {newPath}");
+            throw new DirectoryNotFoundException($"Target Desktop folder does not exist : {newPath}");
         }
 
         var folderIdDesktop = GetDesktopFolderId();

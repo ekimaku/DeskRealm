@@ -1,124 +1,173 @@
-# DeskRealm — Technical audit v0.5.8
+# DeskRealm — Technical audit v0.5.9
 
-## Objectif produit
+## Scope
 
-DeskRealm transforme les bureaux virtuels Windows en espaces de travail réellement séparés : chaque bureau virtuel obtient son propre dossier Desktop, son nom synchronisé depuis Win+Tab, son layout d'icônes et des raccourcis clavier directs.
+This audit covers the `v0.5.8` -> `v0.5.9` release delta.
 
-La ligne v0.5.1 → v0.5.6 a stabilisé la partie la plus sensible : la persistance des positions d'icônes Desktop dans des conditions réelles multi-écrans, résolution variable, DPI / mise à l'échelle et raccourcis répétés sur plusieurs realms.
+`v0.5.8` stabilized the high-risk first-run model by associating the original Windows Desktop path without moving files. `v0.5.9` keeps that safety model and adds a user-facing UX layer around onboarding, hotkeys, layout management, realm/layout locks and runtime actions.
 
-La v0.5.8 ajoute la couche onboarding : un assistant de premier lancement permet d'importer le Desktop Windows initial dans un realm choisi, avec déplacement optionnel des fichiers et sauvegarde optionnelle du layout visible.
+## Version alignment
 
-## Architecture validée
+| Item | Expected | Status |
+|---|---:|---|
+| Project version | `0.5.9` | aligned |
+| Config version | `10` | aligned |
+| Icon layout model version | `3` | unchanged |
+| Public UI language | English | aligned |
+| Changelog release section | `## v0.5.9` | compatible with release helper |
+| Root ZIP folder | `DeskRealm/` | required for source package |
 
-- `VirtualDesktopRegistryService` lit les GUID/noms/order/current desktop depuis Explorer registry.
-- `KnownFolderService` redirige le Desktop Known Folder.
-- `ShellRefreshService` force Explorer/Shell à rafraîchir l'affichage.
-- `DesktopSwitchService` orchestre : détection, assignment, rename, switch, save guards, restore différé, hotkeys et restore-on-exit.
-- `DisplayTopologyService` capture la topologie d'affichage : écrans actifs, bounds, résolution, orientation et DPI effectif / scale.
-- `DesktopIconShellService` capture/restaure les positions via `IFolderView` et `SelectAndPositionItems`.
-- `IconLayoutPersistenceService` stocke plusieurs variants de layout par bureau virtuel.
-- `IconLayoutWorkerClientService` isole les opérations Shell/COM d'icônes dans un worker.
-- `GlobalHotkeyService` enregistre les raccourcis globaux avec `RegisterHotKey`.
-- `VirtualDesktopNavigatorService` bascule vers un desktop numéroté via navigation gauche/droite.
-- `KeyboardInputService` envoie `Win+Ctrl+Left/Right` avec `SendInput`.
-- `StartupService` gère le démarrage Windows via HKCU Run key.
+## Branding/icon integration
 
-## Évolution technique récente
+The v0.5.9 release now includes a proper DeskRealm icon path:
 
-### v0.5.1 — Quiet icon layout
+- `Assets/DeskRealm.ico` is referenced by `DeskRealm.App.csproj` as the application icon.
+- `DeskRealmIcon` extracts the embedded executable icon for the tray and main window.
+- The old generic `SystemIcons.Application` tray icon is no longer used during normal operation.
+- Icon extraction failures are logged with `WARN` before the default icon is used.
 
-- Suppression du polling Shell périodique par défaut.
-- Migration config v2 : `iconLayoutAutoSaveEnabled=false`.
-- Sauvegarde conservée sur switch, sauvegarde manuelle et restore-on-exit.
-- Suppression du refresh Shell post-restauration qui pouvait provoquer un redraw/reflow inutile.
+## Release-helper compatibility
 
-### v0.5.2 — Anti-contamination bureau/path
+The local release helper extracts release notes from `CHANGELOG.md` by locating the requested `## v0.5.9` section and taking every line until the next `##` release heading.
 
-- Refus de sauvegarder un layout si le Desktop Known Folder actif correspond à un realm différent du bureau virtuel Windows courant.
-- Protection contre le cas où Windows a déjà changé de bureau virtuel mais Explorer affiche encore le realm précédent.
+The `v0.5.9` changelog section is therefore kept as the source of truth and includes all user-facing and technical categories needed for the GitHub Release body:
 
-### v0.5.3 — Display topology variants
+- Added
+- Changed
+- Fixed
+- Safety
+- Documentation
 
-- Introduction des variants par topologie : écrans actifs, virtual bounds, résolution, orientation, DPI / scale.
-- Stockage des positions absolues + relatives à l'écran d'origine.
-- Refus temporaire des saves pendant changement d'écran/résolution/scale.
-- Activation du mode DPI `PerMonitorV2` côté projet.
+## User-facing additions
 
-### v0.5.4 — Restore différé après switch
+- `DeskRealmMainForm` provides a tray-opened UI for onboarding, hotkeys, Icon Layout management, actions/options and status.
+- Normal launches remain tray-first; fresh configs open the UI before the first automatic Desktop switch.
+- The window close button hides to tray. **Quit DeskRealm** is the explicit exit path.
+- The UI includes the main tray actions so non-technical users do not need to discover everything through the context menu.
+- The visible shell is modernized with dark custom chrome, owner-painted navigation/buttons/cards/pills and readable disabled states.
 
-- Restauration d'icônes différée après changement de bureau/folder pour laisser Explorer finir d'afficher le realm cible.
-- Garde anti-save pendant pending restore.
-- Retentatives de restore après délai court pour absorber les reflows Explorer.
+## First-run behavior
 
-### v0.5.5 — Verified restore
+- First automatic polling/switching is delayed until onboarding is complete.
+- Association of the original Desktop remains no-move and uses an absolute path assignment.
+- Skip flow creates `DeskRealm - Original Desktop.lnk` shortcuts inside managed realm folders.
+- Shortcut creation failures are surfaced explicitly.
 
-- Placement en groupes plus petits.
-- Vérification des positions réelles après restore.
-- Retry ciblé sur les icônes qui n'ont pas bougé.
-- Logs explicites des icônes encore non conformes.
+## Hotkey behavior
 
-### v0.5.8 — First-run Desktop import wizard
+- Defaults changed to `Win+Shift+X/C/B/N` for desktops 1-4.
+- Migration preserves existing custom hotkeys and only replaces untouched legacy defaults.
+- Hotkey fields are capture-based, not free-form text entry.
+- Capture records the shortcut on the first non-modifier key.
+- Capture cancels if only modifiers are released.
+- Later modifiers are ignored after the main key because capture has already stopped.
+- Duplicate/invalid shortcuts are rejected explicitly after normalization.
 
-- Nouveau flux de premier lancement avant le premier switch automatique.
-- Choix du bureau virtuel cible pour le Desktop Windows existant.
-- Déplacement optionnel des fichiers/raccourcis vers le realm sélectionné.
-- Sauvegarde optionnelle du layout visible comme layout initial du realm.
-- Refus explicite des conflits de noms, sans overwrite ni merge silencieux.
-- Migration config v5 : les installations existantes sont marquées comme déjà traitées pour ne pas afficher l'assistant après upgrade.
+## Pause semantics
 
-### v0.5.6 — Shell identity fallback
+`Config.Enabled` is now documented and presented as **Enable realm switching automation**.
 
-- Enrichissement des layouts avec `shellDisplayName`, `shellParsingName` et `identityKeys`.
-- Matching exact PIDL d'abord, puis fallback par identité Shell lisible.
-- Résolution des cas où la même icône/raccourci existe sur plusieurs realms mais obtient un PIDL différent selon le contexte Explorer.
+When disabled:
 
-## No fallback implicite
+- watch-loop switching is paused;
+- direct DeskRealm desktop hotkeys are ignored;
+- manual refresh/switch paths refuse to switch realms explicitly;
+- existing assignments, realm folders, icons, files and layouts are not changed.
 
-- Pas de bascule vers D1 si le bureau courant est illisible.
-- Pas de création de nom alternatif en cas de conflit de dossiers.
-- Pas de remapping hotkey implicite si Windows refuse une combinaison.
-- Pas de fusion automatique de folders realms.
-- Pas de sauvegarde layout si la topologie ou le bureau courant est ambigu.
-- Pas de startup système global machine ; uniquement HKCU utilisateur courant.
-- Pas de contrainte de licence ajoutée qui contredirait Apache-2.0.
+This removes the ambiguous state where disabling DeskRealm appeared to pause only icon positioning while hotkeys could still move realms.
 
-## Tests terrain validés
+## Icon Layout management
 
-Validé par usage réel sur la machine d'origine :
+The **Icon Layout** tab now reflects the real persisted model:
 
-- switch entre plusieurs bureaux virtuels ;
-- mêmes icônes présentes sur plusieurs realms avec positions différentes ;
-- écran principal éteint/rallumé pendant que l'écran secondaire reste actif ;
-- changement de résolution ;
-- changement de DPI / mise à l'échelle ;
-- retour automatique au bon variant de layout selon le contexte ;
-- correction du cas où certaines icônes étaient `not found` via fallback d'identité Shell.
+```text
+Realm path
+  -> layout JSON file for a virtual desktop GUID
+     -> display-topology variants
+```
 
-## Points à surveiller
+Child rows are saved `variants` from `%APPDATA%\DeskRealm\icon-layouts\<desktop-guid>.json`. Rows show each monitor working area separately and mark the primary display.
 
-- La logique dépend toujours d'Explorer comme Shell Desktop.
-- Les layouts existants pré-v0.5.6 doivent idéalement être resauvegardés une fois par realm pour inclure les nouvelles clés d'identité.
-- Une future UI de settings/diagnostic serait utile pour afficher le variant de topologie actif et les icônes non résolues.
+Lock scopes:
 
-## Choix licence
+```text
+lockedIconLayouts[virtualDesktopGuid]
+lockedRealms[normalizedRealmPath]
+lockedIconLayoutVariants[virtualDesktopGuid|displayTopologyKey]
+```
 
-Licence retenue : Apache License 2.0.
+Realm locks are inherited by child rows and disable child lock/delete actions while keeping the row readable.
 
-Raisons :
+## Locked save behavior
 
-- licence open-source permissive ;
-- obligation de préserver la licence et les notices d'attribution lors de la redistribution de l'œuvre ou de dérivés contenant le code ;
-- compatible avec un `NOTICE` pour demander une attribution claire ;
-- compatible avec un `CITATION.cff` pour GitHub.
+Unlocked automatic saves use the normal save-if-changed path.
 
-Limite explicitement documentée : une inspiration sans copie de code n'est pas une redistribution de l'œuvre, donc la citation est formulée comme une demande communautaire, pas comme une restriction additionnelle.
+Locked automatic saves use `save-locked-merge-new-icons`:
 
-## Sources / inspirations documentées
+- existing saved icon positions are not overwritten;
+- new icons absent from the saved layout can be appended once;
+- full overwrite remains manual and confirmation-gated.
 
-- Microsoft Learn / Win32 APIs.
-- Raymond Chen / The Old New Thing pour la stratégie supportée `IFolderView` des positions d'icônes Desktop.
-- Meziantou pour l'exploration registry des virtual desktops Windows.
-- pmb6tz/windows-desktop-switcher comme prior art des raccourcis directs par numéro.
-- Ciantic/VirtualDesktopAccessor comme prior art important, non embarqué.
+This avoids silent layout contamination while still allowing the user to add a new shortcut to a locked realm.
 
-Voir `docs/REFERENCES.md` et `THIRD_PARTY_NOTICES.md`.
+## Variant deletion
+
+The variant `Delete` action is destructive only for DeskRealm metadata:
+
+- confirmation is required;
+- Desktop files/icons/shortcuts are not deleted;
+- the selected `variants[]` entry is removed from the layout JSON;
+- matching `lockedIconLayoutVariants` config entry is removed;
+- empty layout JSON files are deleted;
+- if variants remain, the newest remaining variant is promoted to the legacy/current top-level fields.
+
+## Documentation alignment
+
+Updated release documentation:
+
+- `README.md`
+- `CHANGELOG.md`
+- `docs/release-notes/v0.5.9.md`
+- `docs/patch-notes/PATCH_NOTES_v0_5_9.md`
+- `docs/CONFIGURATION.md`
+- `docs/INSTALLATION.md`
+- `docs/ARCHITECTURE.md`
+- `docs/SAFETY_AND_PRIVACY.md`
+- `SMOKE_TEST.md`
+- `TODO.md`
+
+Transient block TODO files from the iterative `v0.5.9` implementation were consolidated into `TODO.md` for a cleaner release tree.
+
+## Validation status
+
+Static repository validation completed in this environment:
+
+- `CHANGELOG.md` contains a release-helper-compatible `## v0.5.9` section.
+- `docs/release-notes/v0.5.9.md` exists and documents the user-facing release.
+- `docs/patch-notes/PATCH_NOTES_v0_5_9.md` exists and documents the technical delta.
+- Project version references are aligned to `0.5.9`.
+- Config version references are aligned to `10`.
+- Root package folder is expected to be `DeskRealm/`.
+
+Windows build/runtime validation must still be performed locally with:
+
+```powershell
+.\scripts\Build-Release.ps1
+```
+
+Expected result: release build succeeds without warnings.
+
+## Recommended manual smoke tests
+
+- Fresh first-run onboarding opens before the first automatic switch.
+- Association of original Desktop does not move files.
+- Skip path creates original Desktop shortcuts.
+- UI opens from tray and hides to tray on close.
+- **Quit DeskRealm** exits the app.
+- Hotkey capture records `Win+Ctrl+G` when `G` is pressed.
+- Modifier-only hotkey capture cancels on release.
+- `Win` -> `G` -> `Ctrl` records `Win+G` and ignores the later `Ctrl`.
+- Paused automation ignores DeskRealm desktop hotkeys and refuses manual realm switching.
+- Icon Layout tab shows saved variants, per-monitor working areas and primary markers.
+- Layout/realm/variant locks protect autosaves.
+- Variant deletion removes only the saved layout variant.

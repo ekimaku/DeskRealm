@@ -40,7 +40,7 @@ internal sealed class DesktopIconShellService
                     ThrowIfFailed(hr, $"IFolderView.Item({index})");
                     if (pidl == IntPtr.Zero)
                     {
-                        throw new InvalidOperationException($"IFolderView.Item({index}) a retourné un PIDL vide.");
+                        throw new InvalidOperationException($"IFolderView.Item({index}) returned an empty PIDL.");
                     }
 
                     var itemKey = BuildPidlItemKey(pidl);
@@ -74,7 +74,7 @@ internal sealed class DesktopIconShellService
                 }
             }
 
-            ValidateNoDuplicateItemKeys(positions, "sauvegarder");
+            ValidateNoDuplicateItemKeys(positions, "save");
             _logger.Info($"Icon layout capture phase: captured {positions.Count} positions.");
             return positions;
         }
@@ -114,7 +114,7 @@ internal sealed class DesktopIconShellService
                 ThrowIfFailed(hr, $"IFolderView.Item({index})");
                 if (pidl == IntPtr.Zero)
                 {
-                    throw new InvalidOperationException($"IFolderView.Item({index}) a retourné un PIDL vide.");
+                    throw new InvalidOperationException($"IFolderView.Item({index}) returned an empty PIDL.");
                 }
 
                 var itemKey = BuildPidlItemKey(pidl);
@@ -122,8 +122,8 @@ internal sealed class DesktopIconShellService
                 {
                     Marshal.FreeCoTaskMem(pidl);
                     throw new InvalidOperationException(
-                        $"Layout icônes ambigu : deux items Desktop actuels ont la même clé PIDL '{itemKey}'. " +
-                        "DeskRealm refuse d'appliquer un layout ambigu.");
+                        $"Ambiguous icon layout: two current Desktop items share the same PIDL key '{itemKey}'. " +
+                        "DeskRealm refuses to apply an ambiguous layout.");
                 }
 
                 var shellDisplayName = TryGetShellDisplayName(folder, pidl, ShellConstants.SHGDN_INFOLDER);
@@ -485,7 +485,7 @@ internal sealed class DesktopIconShellService
         ThrowIfFailed(hr, "IFolderView.ItemCount(SVGIO_ALLVIEW)");
         if (count < 0)
         {
-            throw new InvalidOperationException($"Nombre d'icônes Desktop invalide : {count}.");
+            throw new InvalidOperationException($"Invalid Desktop icon count: {count}.");
         }
 
         return count;
@@ -505,7 +505,7 @@ internal sealed class DesktopIconShellService
 
         if (pidl == IntPtr.Zero)
         {
-            throw new InvalidOperationException("PIDL vide : clé item impossible.");
+            throw new InvalidOperationException("Empty PIDL: item key unavailable.");
         }
 
         var bytes = new List<byte>();
@@ -522,7 +522,7 @@ internal sealed class DesktopIconShellService
 
             if (cb < 2 || cb > maxSegmentBytes)
             {
-                throw new InvalidOperationException($"PIDL invalide : segment cb={cb}, offset={offset}.");
+                throw new InvalidOperationException($"Invalid PIDL: segment cb={cb}, offset={offset}.");
             }
 
             var segment = new byte[cb];
@@ -531,7 +531,7 @@ internal sealed class DesktopIconShellService
             offset += cb;
         }
 
-        throw new InvalidOperationException($"PIDL invalide : terminateur introuvable avant {maxPidlBytes} bytes.");
+        throw new InvalidOperationException($"Invalid PIDL: terminator not found before {maxPidlBytes} bytes.");
     }
 
     private static string BuildTechnicalDisplayName(int index, string itemKey)
@@ -550,8 +550,8 @@ internal sealed class DesktopIconShellService
         if (duplicate is not null)
         {
             throw new InvalidOperationException(
-                $"Layout icônes ambigu : plusieurs icônes portent la même clé item '{duplicate.Key}'. " +
-                $"DeskRealm refuse de {action} un layout ambigu.");
+                $"Ambiguous icon layout: multiple icons share the same item key '{duplicate.Key}'. " +
+                $"DeskRealm refuses to {action} an ambiguous layout.");
         }
     }
 
@@ -561,17 +561,17 @@ internal sealed class DesktopIconShellService
         if (legacy.Count > 0)
         {
             throw new InvalidOperationException(
-                "Layout icônes ancien format détecté : il ne contient pas les clés item stables ajoutées en v0.3.3. " +
-                "Lance 'Save icon layout now' une fois sur ce realm pour régénérer le layout.");
+                "Legacy icon layout format detected: it does not contain the stable item keys added in v0.3.3. " +
+                "Run 'Save icon layout now' once on this realm to regenerate the layout.");
         }
 
-        ValidateNoDuplicateItemKeys(savedPositions, "restaurer");
+        ValidateNoDuplicateItemKeys(savedPositions, "restore");
     }
 
     private static IFolderView GetDesktopFolderView()
     {
         var shellWindowsType = Type.GetTypeFromCLSID(ShellGuids.CLSID_ShellWindows)
-            ?? throw new InvalidOperationException("CLSID_ShellWindows introuvable.");
+            ?? throw new InvalidOperationException("CLSID_ShellWindows not found.");
 
         object? shellWindowsObject = null;
         object? dispatch = null;
@@ -581,7 +581,7 @@ internal sealed class DesktopIconShellService
         try
         {
             shellWindowsObject = Activator.CreateInstance(shellWindowsType)
-                ?? throw new InvalidOperationException("Impossible de créer ShellWindows.");
+                ?? throw new InvalidOperationException("Cannot create ShellWindows.");
 
             dynamic shellWindows = shellWindowsObject;
             object loc = ShellConstants.CSIDL_DESKTOP;
@@ -599,7 +599,7 @@ internal sealed class DesktopIconShellService
 
             if (dispatch is null)
             {
-                throw new InvalidOperationException("FindWindowSW n'a retourné aucun dispatch Desktop.");
+                throw new InvalidOperationException("FindWindowSW did not return any Desktop dispatch.");
             }
 
             var serviceProvider = (IServiceProvider)dispatch;
@@ -632,7 +632,7 @@ internal sealed class DesktopIconShellService
     {
         if (hr < 0)
         {
-            throw new InvalidOperationException($"{operation} a échoué avec HRESULT 0x{hr:X8}.", Marshal.GetExceptionForHR(hr));
+            throw new InvalidOperationException($"{operation} failed with HRESULT 0x{hr:X8}.", Marshal.GetExceptionForHR(hr));
         }
     }
 

@@ -37,7 +37,7 @@ internal sealed class StartupService
         var command = $"\"{exe}\"";
         using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true)
             ?? Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true)
-            ?? throw new InvalidOperationException($"Impossible d'ouvrir/créer HKCU\\{RunKeyPath}.");
+            ?? throw new InvalidOperationException($"Cannot open/create HKCU\\{RunKeyPath}.");
 
         key.SetValue(ValueName, command, RegistryValueKind.String);
         _logger.Info($"Start with Windows enabled: {command}");
@@ -70,6 +70,6 @@ internal sealed class StartupService
             return Path.GetFullPath(path);
         }
 
-        throw new InvalidOperationException("Impossible de déterminer le chemin de l'exécutable DeskRealm pour le démarrage Windows.");
+        throw new InvalidOperationException("Cannot determine the DeskRealm executable path for Windows startup.");
     }
 }

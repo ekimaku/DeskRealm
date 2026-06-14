@@ -1,6 +1,58 @@
 # Changelog
 
-Current stable: `v0.5.8`.
+Current stable: `v0.5.9`.
+
+## v0.5.9 — First-run UX, modern UI and layout controls
+
+### Added
+- Added the main DeskRealm window, opened from the tray or tray icon double-click, while keeping the default runtime tray-first.
+- Added first-run onboarding inside the main window so fresh installs explain DeskRealm before the first automatic Desktop switch.
+- Added a safe first-run choice to associate the original Windows Desktop with one realm without moving files.
+- Added a skip path that creates `DeskRealm - Original Desktop.lnk` shortcuts inside managed realms so the original Desktop remains easy to find.
+- Added a modern dark/cyan DeskRealm UI shell with custom navigation, rounded cards, custom buttons, status pills and dark in-app window chrome.
+- Added the DeskRealm `DR` logo as the compiled executable icon, tray notification icon and main window icon.
+- Added UI access to the main tray actions: refresh, sync names, save/restore icon layout, restore original Desktop, startup toggle, open realms/config/logs and quit.
+- Added capture-based hotkey fields in the **Hotkeys** tab. Click a field, hold one or two modifiers, then press the main key to record the shortcut.
+- Added the dedicated **Icon Layout** tab with collapsible realm rows and child rows for saved display-topology layout variants.
+- Added layout locks, realm locks and variant locks from the UI.
+- Added locked-layout autosave merge mode: existing icon positions stay protected, while newly added icons can be captured once.
+- Added confirmation-gated manual overwrite for locked layouts.
+- Added confirmation-gated `Delete` for saved layout variants. Deleting a variant removes only DeskRealm layout metadata, never Desktop files or icons.
+
+### Changed
+- Closing the DeskRealm window with the cross now hides it back to the tray. **Quit DeskRealm** is the explicit app exit.
+- Default desktop hotkeys now avoid common Windows/app conflicts: desktop 1-4 use `Win+Shift+X`, `Win+Shift+C`, `Win+Shift+B`, `Win+Shift+N`.
+- Existing customized hotkeys are preserved during migration; only untouched legacy defaults are replaced.
+- `enabled` is now presented as **Enable realm switching automation**. When disabled, automatic realm switching and DeskRealm desktop hotkeys are paused without deleting data.
+- Hotkey capture now stops immediately on the first non-modifier key. Releasing only modifier keys cancels capture and restores the previous value.
+- The **Icon Layout** tab now shows saved `variants` from each layout JSON file instead of a single combined layout row.
+- Variant rows show each persisted display working area separately using `DisplayX.workingWidth` / `DisplayX.workingHeight`, with `✅` marking the primary display.
+- Config version is now `10`, adding lock dictionaries for layouts, realms and exact layout variants.
+- Realm locks are stored by normalized realm path so the lock applies to every desktop/layout assigned to that realm.
+- Variant locks are stored as `{virtual-desktop-guid}|{display-topology-key}`.
+- DeskRealm public UI strings remain English.
+- The tray icon now loads the embedded application icon from the compiled executable instead of the generic Windows application icon.
+
+### Fixed
+- Fixed ambiguous pause behavior where DeskRealm desktop hotkeys could still switch realms while DeskRealm was disabled.
+- Fixed hotkey capture so later modifier keys cannot be appended after a main key has already been recorded.
+- Fixed modifier-only capture attempts so they cancel cleanly when modifiers are released.
+- Fixed visual artifacts around custom buttons by replacing native `Button` rendering with a pure owner-painted control.
+- Fixed clipped text, clipped child-row borders and residual WinForms repaint artifacts in the modern UI.
+- Fixed the bright native title bar by replacing it with custom dark in-app chrome.
+- Fixed nullable WinForms font construction warnings in the Windows release build.
+
+### Safety
+- The first automatic Desktop switch is delayed until the first-run decision is completed.
+- First-run onboarding no longer moves Desktop files. Association points the selected realm to the original Desktop path.
+- Shortcut creation failures are explicit and do not silently complete onboarding.
+- Locked layouts refuse silent overwrite. Autosave can only merge new icons; full overwrite requires confirmation.
+- Locked realms protect all child layout variants assigned to that realm and disable child destructive actions.
+- Variant deletion is scoped to DeskRealm metadata and requires confirmation.
+
+### Documentation
+- Updated README, CHANGELOG, release notes, patch notes, installation, configuration, architecture, safety, smoke test, TODO and technical audit for the full `v0.5.8` -> `v0.5.9` delta.
+- Documented the branded executable/tray icon integration in the release documentation.
 
 ## v0.5.8 — Safe first-run Desktop association
 
@@ -61,86 +113,22 @@ Current stable: `v0.5.8`.
 
 - Added display topology variants for icon layouts, keyed by active monitor set, virtual bounds, resolution, orientation and effective DPI / scale.
 - Added per-icon screen-relative metadata so best-effort restores can adapt positions when resolution or scale changes.
-- Added a display topology save guard that skips saves while monitor/resolution/DPI changes are settling, preventing Windows-compacted positions from contaminating a realm.
-- Added automatic restore of the current realm after a display topology change settles.
-- Enabled PerMonitorV2 DPI awareness so DeskRealm can see per-monitor scale values for layout keys.
+- Added a display topology save guard that skips saves while monitor/resolution/DPI changes are settling.
 
-## v0.5.2 — Icon layout save guard
+## v0.5.2 — Icon layout persistence
 
-- Prevented icon layout saves when the active Windows virtual desktop does not match the DeskRealm realm currently assigned as the known Desktop folder.
-- Fixed cross-desktop icon position contamination when identical icons exist on multiple realms with different positions.
-- Kept pre-switch saves for DeskRealm hotkey navigation, where the previous desktop is still active and safe to capture.
-- Added explicit refusal for manual icon layout saves when the known Desktop path and current virtual desktop are out of sync.
+- Added per-desktop icon layout save/restore.
+- Added isolated icon-layout worker process for Shell/COM resilience.
+- Added manual tray actions to save and restore icon layouts.
 
-## v0.5.1 — Quiet icon layout hotfix
+## v0.5.1 — Release automation and tray polish
 
-- Disabled background icon layout autosave by default to avoid periodic cursor busy-state flicker.
-- Added config migration from v1 to v2 that disables old periodic autosave settings.
-- Preserved automatic layout saving on desktop switch and before exit restore.
-- Removed post-restore Shell refresh after icon placement.
-- Updated docs to describe the quiet save model.
+- Added release helper and GitHub release workflow documentation.
+- Added tray actions for startup, logs/config access and safer runtime control.
 
-## v0.5.0 — Open-source publication package
+## v0.5.0 — First public open-source release
 
-- Added Apache-2.0 `LICENSE`.
-- Added `NOTICE` with attribution notice.
-- Added `CITATION.cff` for GitHub citation support.
-- Added `AUTHORS.md`, `THIRD_PARTY_NOTICES.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `CODE_OF_CONDUCT.md`.
-- Added GitHub issue/PR templates.
-- Added documentation: architecture, configuration, safety/privacy, attribution, references, release checklist, installation and release process.
-- Added GitHub Actions workflow for Windows build artifacts and tag-based releases.
-- Added portable `win-x64` release ZIP packaging.
-- Added transparent PowerShell install/uninstall bundle packaging.
-
-## v0.4.1 — SendInput hotkey fix
-
-- Fixed native `INPUT` structure for `SendInput`.
-- Added `hotkeyInitialDelayMs` to avoid modifier collision while the registered hotkey is still physically held.
-
-## v0.4.0 — Hotkeys and Windows startup
-
-- Added configurable direct desktop hotkeys.
-- Added tray toggle for startup with Windows.
-- Added hotkey reload from config.
-
-## v0.3.3 — Icon identity fix and autosave
-
-- Fixed icon identity/position mismatch by using a PIDL-derived item key.
-- Added icon layout autosave with change detection.
-
-## v0.3.2 — Shell icon worker hardening
-
-- Replaced fragile `STRRET` display name path.
-- Added capture/restore phase logging.
-
-## v0.3.1 — Icon crash guard
-
-- Isolated icon layout Shell/COM operations in a worker process.
-- Main tray process remains alive if the worker fails.
-
-## v0.3.0 — Icon layouts per realm
-
-- Added save/restore of Desktop icon positions per virtual desktop GUID.
-
-## v0.2.0 — Task View names to folders
-
-- Synced realm folder names from Windows Task View virtual desktop names.
-- Renamed existing folders instead of duplicating them.
-
-## v0.1.3 — Robust current desktop registry detection
-
-- Added multiple registry lookup paths for `CurrentVirtualDesktop`.
-
-## v0.1.2 — Stable ZIP root
-
-- ZIP root folder changed to `DeskRealm/`.
-
-## v0.1.1 — CS0199 build fix
-
-- Fixed readonly GUID passed by `ref` to P/Invoke.
-
-## v0.1.0 — Native desktop switch prototype
-
-- Initial tray app.
-- Desktop Known Folder switching by virtual desktop.
-- Restore path and emergency restore script.
+- Initial public DeskRealm release.
+- Per-Windows-virtual-desktop Desktop folder switching.
+- Realm folder creation, assignment and Task View name sync.
+- Tray-first Windows utility model.

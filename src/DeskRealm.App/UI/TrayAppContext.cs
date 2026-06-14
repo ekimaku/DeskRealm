@@ -12,7 +12,9 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly FileLogger _logger;
     private readonly System.Windows.Forms.Timer _timer;
     private readonly NotifyIcon _notifyIcon;
-    private StatusForm? _statusForm;
+    private readonly Icon _appIcon;
+    private bool _pollingStarted;
+    private DeskRealmMainForm? _mainForm;
 
     public TrayAppContext(
         DesktopSwitchService switchService,
@@ -28,16 +30,17 @@ internal sealed class TrayAppContext : ApplicationContext
         _logger = logger;
 
         _switchService.Initialize();
-        OfferInitialDesktopImportIfNeeded();
         SynchronizeStartupFromConfig(showErrors: false);
 
+        _appIcon = DeskRealmIcon.Load(_logger);
         _notifyIcon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = _appIcon,
             Text = "DeskRealm",
             Visible = true,
             ContextMenuStrip = BuildMenu()
         };
+        _notifyIcon.DoubleClick += (_, _) => ShowDeskRealmUi(firstRun: false);
 
         _hotkeys.DesktopHotkeyPressed += OnDesktopHotkeyPressed;
         var hotkeyErrors = _hotkeys.Start(_switchService.Config);
@@ -47,74 +50,38 @@ internal sealed class TrayAppContext : ApplicationContext
             Interval = _switchService.Config.PollIntervalMs
         };
         _timer.Tick += (_, _) => SafeTick();
-        _timer.Start();
 
-        SafeTick();
+        var waitingForFirstRunDecision = _switchService.ShouldOfferInitialDesktopImport();
+        if (waitingForFirstRunDecision)
+        {
+            ShowDeskRealmUi(firstRun: true);
+        }
+        else
+        {
+            StartPollingIfNeeded();
+        }
 
-        var balloonText = hotkeyErrors.Count == 0
-            ? "Native switch actif. Hotkeys bureaux actifs."
-            : "Native switch actif. Certains hotkeys ont été refusés, voir logs.";
+        var balloonText = waitingForFirstRunDecision
+            ? "First-run setup must be completed before the first automatic switch."
+            : hotkeyErrors.Count == 0
+                ? "Native switching is active. Desktop hotkeys are active."
+                : "Native switching is active. Some hotkeys were rejected; check logs.";
         _notifyIcon.ShowBalloonTip(3500, "DeskRealm", balloonText, hotkeyErrors.Count == 0 ? ToolTipIcon.Info : ToolTipIcon.Warning);
-    }
-
-
-
-    private void OfferInitialDesktopImportIfNeeded()
-    {
-        if (!_switchService.ShouldOfferInitialDesktopImport())
-        {
-            return;
-        }
-
-        try
-        {
-            using var form = new InitialDesktopImportForm(
-                _switchService.GetVirtualDesktopsSnapshot(),
-                _switchService.GetCurrentVirtualDesktopId());
-
-            var result = form.ShowDialog();
-            if (result == DialogResult.OK)
-            {
-                _switchService.ImportOriginalDesktopToVirtualDesktop(
-                    form.SelectedDesktopId,
-                    form.LinkOriginalDesktop,
-                    form.SaveLayout);
-
-                MessageBox.Show(
-                    "Desktop initial associé sans déplacer les fichiers. DeskRealm va maintenant activer le realm correspondant au bureau virtuel courant.",
-                    "DeskRealm — import terminé",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
-
-            _switchService.MarkInitialDesktopImportSkipped();
-        }
-        catch (Exception ex)
-        {
-            _logger.Error("Initial Desktop import wizard failed", ex);
-            MessageBox.Show(
-                "L'import du Desktop initial a échoué. DeskRealm ne continue pas silencieusement.\n\n" + ex.Message,
-                "DeskRealm — import Desktop initial",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-            throw;
-        }
     }
 
     private ContextMenuStrip BuildMenu()
     {
         var menu = new ContextMenuStrip();
 
-        menu.Items.Add("Statut", null, (_, _) => ShowStatus());
+        menu.Items.Add("Open DeskRealm", null, (_, _) => ShowDeskRealmUi(firstRun: false));
         menu.Items.Add("Refresh now", null, (_, _) => SafeAction("Refresh now", () => _switchService.SwitchNow()));
         menu.Items.Add("Sync names now", null, (_, _) => SafeAction("Sync names now", () => _switchService.SyncRealmNamesNow()));
-        menu.Items.Add("Save icon layout now", null, (_, _) => SafeAction("Save icon layout now", () => _switchService.SaveIconLayoutNow()));
+        menu.Items.Add("Save icon layout now", null, (_, _) => SafeAction("Save icon layout now", ConfirmAndSaveIconLayoutNow));
         menu.Items.Add("Restore icon layout now", null, (_, _) => SafeAction("Restore icon layout now", () => _switchService.RestoreIconLayoutNow()));
         menu.Items.Add("Reload hotkeys from config", null, (_, _) => SafeAction("Reload hotkeys", ReloadHotkeys));
         menu.Items.Add("Pause / Resume", null, (_, _) => TogglePause());
 
-        var startupItem = new ToolStripMenuItem("Démarrer avec Windows")
+        var startupItem = new ToolStripMenuItem("Start with Windows")
         {
             Checked = _startupService.IsEnabledForCurrentExecutable(),
             CheckOnClick = false
@@ -123,18 +90,26 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(startupItem);
 
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Ouvrir realms", null, (_, _) => OpenPath(_switchService.Config.RealmsRoot!));
-        menu.Items.Add("Ouvrir config", null, (_, _) => OpenPath(AppPaths.ConfigPath));
-        menu.Items.Add("Ouvrir logs", null, (_, _) => OpenPath(AppPaths.LogFilePath));
+        menu.Items.Add("Open realms", null, (_, _) => OpenPath(_switchService.Config.RealmsRoot!));
+        menu.Items.Add("Open config", null, (_, _) => OpenPath(AppPaths.ConfigPath));
+        menu.Items.Add("Open logs", null, (_, _) => OpenPath(AppPaths.LogFilePath));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Restaurer Desktop original", null, (_, _) => SafeAction("Restore", () => _switchService.RestoreOriginalDesktop()));
-        menu.Items.Add("Quitter", null, (_, _) => ExitThread());
+        menu.Items.Add("Restore original Desktop", null, (_, _) => SafeAction("Restore", () => _switchService.RestoreOriginalDesktop()));
+        menu.Items.Add("Quit", null, (_, _) => ExitThread());
 
         return menu;
     }
 
     private void OnDesktopHotkeyPressed(int desktopNumber, string hotkey)
     {
+        if (!_switchService.Config.Enabled)
+        {
+            _logger.Info($"Hotkey ignored while DeskRealm is disabled: {hotkey} -> desktop #{desktopNumber}");
+            _notifyIcon.ShowBalloonTip(2000, "DeskRealm", "DeskRealm is paused. Enable realm switching automation to use desktop hotkeys.", ToolTipIcon.Info);
+            _mainForm?.RefreshAll();
+            return;
+        }
+
         SafeAction($"Hotkey {hotkey}", () =>
         {
             // WM_HOTKEY is raised while the triggering keys may still be physically down.
@@ -149,14 +124,36 @@ internal sealed class TrayAppContext : ApplicationContext
         });
     }
 
+    private void ConfirmAndSaveIconLayoutNow()
+    {
+        var locked = _switchService.IsCurrentLayoutOrRealmLocked();
+        if (locked)
+        {
+            var result = MessageBox.Show(
+                "This layout or its realm is locked. A manual save will replace the protected positions with the current Desktop state.\n\nOverwrite the locked layout?",
+                "DeskRealm — locked layout",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+
+            if (result != DialogResult.Yes)
+            {
+                _logger.Info("Locked icon layout manual overwrite cancelled from tray.");
+                return;
+            }
+        }
+
+        _switchService.SaveIconLayoutNow(overwriteLockedLayout: locked);
+    }
+
     private void ReloadHotkeys()
     {
         var errors = _hotkeys.Start(_switchService.Config);
-        _statusForm?.RefreshStatus();
+        _mainForm?.RefreshAll();
         if (errors.Count > 0)
         {
             MessageBox.Show(
-                "Certains hotkeys ont été refusés ou sont invalides :" + Environment.NewLine + Environment.NewLine +
+                "Some hotkeys were rejected or are invalid:" + Environment.NewLine + Environment.NewLine +
                 string.Join(Environment.NewLine, errors),
                 "DeskRealm — hotkeys",
                 MessageBoxButtons.OK,
@@ -164,7 +161,19 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
-        _notifyIcon.ShowBalloonTip(2000, "DeskRealm", "Hotkeys rechargés depuis la config.", ToolTipIcon.Info);
+        _notifyIcon.ShowBalloonTip(2000, "DeskRealm", "Hotkeys reloaded from config.", ToolTipIcon.Info);
+    }
+
+    private void StartPollingIfNeeded()
+    {
+        if (_pollingStarted)
+        {
+            return;
+        }
+
+        _pollingStarted = true;
+        _timer.Start();
+        SafeTick();
     }
 
     private void SafeTick()
@@ -172,7 +181,7 @@ internal sealed class TrayAppContext : ApplicationContext
         try
         {
             _switchService.Tick();
-            _statusForm?.RefreshStatus();
+            _mainForm?.RefreshStatus();
         }
         catch (Exception ex)
         {
@@ -180,7 +189,7 @@ internal sealed class TrayAppContext : ApplicationContext
             _timer.Stop();
             _notifyIcon.ShowBalloonTip(
                 5000,
-                "DeskRealm — erreur stricte",
+                "DeskRealm — strict error",
                 ex.Message,
                 ToolTipIcon.Error);
         }
@@ -191,12 +200,12 @@ internal sealed class TrayAppContext : ApplicationContext
         try
         {
             action();
-            _statusForm?.RefreshStatus();
+            _mainForm?.RefreshAll();
         }
         catch (Exception ex)
         {
             _logger.Error($"Action failed: {name}", ex);
-            MessageBox.Show(ex.Message, "DeskRealm — erreur", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(ex.Message, "DeskRealm — error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
@@ -230,7 +239,7 @@ internal sealed class TrayAppContext : ApplicationContext
             _switchService.Config.StartWithWindows = next;
             _configService.Save(_switchService.Config);
             item.Checked = next;
-            _notifyIcon.ShowBalloonTip(2000, "DeskRealm", next ? "Démarrage Windows activé." : "Démarrage Windows désactivé.", ToolTipIcon.Info);
+            _notifyIcon.ShowBalloonTip(2000, "DeskRealm", next ? "Windows startup enabled." : "Windows startup disabled.", ToolTipIcon.Info);
         });
     }
 
@@ -253,17 +262,25 @@ internal sealed class TrayAppContext : ApplicationContext
             _logger.Error("Startup sync failed", ex);
             if (showErrors)
             {
-                MessageBox.Show(ex.Message, "DeskRealm — démarrage Windows", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(ex.Message, "DeskRealm — Windows startup", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }
 
-    private void ShowStatus()
+    private void ShowDeskRealmUi(bool firstRun)
     {
-        _statusForm ??= new StatusForm(_switchService);
-        _statusForm.RefreshStatus();
-        _statusForm.Show();
-        _statusForm.Activate();
+        _mainForm ??= new DeskRealmMainForm(
+            _switchService,
+            _configService,
+            _startupService,
+            ReloadHotkeys,
+            ExitThread,
+            StartPollingIfNeeded,
+            _logger);
+
+        _mainForm.ShowFirstRunPanel(firstRun && _switchService.ShouldOfferInitialDesktopImport());
+        _mainForm.Show();
+        _mainForm.Activate();
     }
 
     private static void OpenPath(string path)
@@ -280,7 +297,7 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
-        MessageBox.Show($"Chemin introuvable : {path}", "DeskRealm", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        MessageBox.Show($"Path not found: {path}", "DeskRealm", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
 
     protected override void ExitThreadCore()
@@ -300,15 +317,17 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             _logger.Error("Restore on exit failed", ex);
             MessageBox.Show(
-                "DeskRealm n'a pas pu restaurer automatiquement le Desktop original. Lance scripts\\Restore-Desktop.ps1.\n\n" + ex.Message,
-                "DeskRealm — restore échoué",
+                "DeskRealm could not automatically restore the original Desktop. Run scripts\\Restore-Desktop.ps1.\n\n" + ex.Message,
+                "DeskRealm — restore failed",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
 
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
-        _statusForm?.Dispose();
+        _appIcon.Dispose();
+        _mainForm?.PrepareForApplicationExit();
+        _mainForm?.Dispose();
         base.ExitThreadCore();
     }
 }

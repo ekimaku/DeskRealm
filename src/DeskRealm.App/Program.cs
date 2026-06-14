@@ -38,7 +38,7 @@ internal static class Program
         if (appLock is null)
         {
             MessageBox.Show(
-                "DeskRealm est déjà lancé. Regarde dans la zone de notification Windows.",
+                "DeskRealm is already running. Check the Windows notification area.",
                 "DeskRealm",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -66,7 +66,7 @@ internal static class Program
         catch (Exception ex)
         {
             logger.Error("Fatal startup error", ex);
-            MessageBox.Show(ex.Message, "DeskRealm — erreur fatale", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(ex.Message, "DeskRealm — fatal error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
@@ -82,7 +82,7 @@ internal static class Program
         {
             if (args.Length != 4)
             {
-                throw new InvalidOperationException("Usage worker invalide : --icon-layout-worker <save|restore> <virtualDesktopGuid> <realmName>");
+                throw new InvalidOperationException("Usage worker invalide : --icon-layout-worker <save|save-if-changed|save-locked-merge-new-icons|restore> <virtualDesktopGuid> <realmName>");
             }
 
             var operation = args[1];
@@ -102,13 +102,17 @@ internal static class Program
             {
                 iconLayouts.SaveIfChanged(virtualDesktopId, realmName);
             }
+            else if (string.Equals(operation, "save-locked-merge-new-icons", StringComparison.OrdinalIgnoreCase))
+            {
+                iconLayouts.SaveLockedMergeNewIcons(virtualDesktopId, realmName);
+            }
             else if (string.Equals(operation, "restore", StringComparison.OrdinalIgnoreCase))
             {
                 iconLayouts.Restore(virtualDesktopId, realmName);
             }
             else
             {
-                throw new InvalidOperationException($"Opération worker inconnue : {operation}");
+                throw new InvalidOperationException($"Unknown worker operation: {operation}");
             }
 
             logger.Info($"Icon layout worker completed: {operation} {realmName} {virtualDesktopId:B}");

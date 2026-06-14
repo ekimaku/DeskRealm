@@ -13,7 +13,8 @@ DeskRealm is a Windows tray utility. For normal users, prefer the release artifa
    ```
 
 4. Run `DeskRealm.App.exe`.
-5. In the tray menu, enable **Démarrer avec Windows** if you want it to start automatically.
+5. On a fresh config, complete the DeskRealm first-run window before the first automatic Desktop switch.
+6. In the tray or UI, enable **Start with Windows** if you want it to start automatically.
 
 ## Install bundle
 
@@ -41,34 +42,50 @@ Uninstall:
 powershell -ExecutionPolicy Bypass -File .\Uninstall-DeskRealm.ps1
 ```
 
-By default, uninstall preserves `%APPDATA%\DeskRealm` and `%LOCALAPPDATA%\DeskRealm` so your config, icon layouts and logs are not destroyed. Use `-RemoveUserConfig` only if you intentionally want a full cleanup.
+By default, uninstall preserves `%APPDATA%\DeskRealm` and `%LOCALAPPDATA%\DeskRealm` so config, icon layouts and logs are not destroyed. Use `-RemoveUserConfig` only if you intentionally want a full cleanup.
 
-## Upgrading from v0.5.0-v0.5.6
+## Upgrading from v0.5.8 to v0.5.9
 
-1. Quit DeskRealm from the tray.
+1. Quit DeskRealm from the tray or from **Quit DeskRealm** in the UI.
 2. Replace the app files with the new release files.
 3. Launch DeskRealm.
-4. Use **Save icon layout now** once on each important realm if you are upgrading from a version older than v0.5.6, so layouts are refreshed with display-topology and Shell identity metadata.
-5. Test your normal monitor/resolution/DPI setup, then any known alternate setup such as one monitor off or a game resolution.
+4. Open the UI from the tray.
+5. Review the new **Hotkeys** and **Icon Layout** tabs.
+6. Test your normal monitor/resolution/DPI setup, then any known alternate setup such as one monitor off or a game resolution.
 
-DeskRealm migrates config automatically. Existing installs are marked as first-run-import completed so the v0.5.8 wizard does not interrupt upgrades. Old icon layout files only gain the richest v0.5.6+ identity metadata after they are saved again.
+DeskRealm migrates config automatically to version `10`.
 
+Existing customized hotkeys are preserved. Only untouched legacy default hotkeys are changed to the `v0.5.9` defaults: `Win+Shift+X/C/B/N` for desktops 1-4.
+
+Existing installs are not interrupted by first-run onboarding. The first-run window opens automatically only on fresh configs that have not completed onboarding.
+
+## Upgrading from older v0.5.x builds
+
+If you are upgrading from a version older than `v0.5.6`, use **Save icon layout now** once on each important realm so layouts are refreshed with display-topology and Shell identity metadata.
 
 ## First run on a new installation
 
-On a fresh v0.5.8 installation, DeskRealm can offer to associate the current Windows Desktop before the first automatic realm switch.
+On a fresh `v0.5.9` installation, DeskRealm opens its main UI before the first automatic realm switch.
 
-The wizard lets you choose:
+The onboarding lets you choose:
 
-- which Windows virtual desktop should receive the current Desktop;
-- whether existing Desktop files and shortcuts should be moved into that realm;
-- whether the current icon positions should be saved as that realm's initial layout.
+- associate the current Windows Desktop folder with a selected virtual desktop realm, without moving files;
+- save the current icon layout as that realm's initial layout;
+- skip association and create `DeskRealm - Original Desktop.lnk` shortcuts inside managed realms.
 
-The import is strict: if a file with the same name already exists in the target realm, DeskRealm stops and shows an explicit conflict instead of overwriting or merging.
+The skip path exists so users can still reach their old Desktop easily after DeskRealm starts showing realm folders. Shortcut creation failures are explicit.
+
+## Normal runtime behavior
+
+DeskRealm runs mainly from the tray. The main UI is hidden by default and can be opened from the tray or by double-clicking the tray icon.
+
+Closing the UI with the cross hides it back to the tray. To stop DeskRealm, use **Quit DeskRealm** in the UI or **Quit** in the tray.
+
+DeskRealm public UI strings are English.
 
 ## Build from source
 
-Install the .NET 8 SDK, then run:
+Install the .NET 8 SDK on Windows, then run:
 
 ```powershell
 .\scripts\Build-Release.ps1
@@ -79,6 +96,8 @@ The local build output is:
 ```text
 .\dist\DeskRealm\DeskRealm.App.exe
 ```
+
+The local build should embed the DeskRealm `DR` icon from `src\DeskRealm.App\Assets\DeskRealm.ico`. After build, Windows should show the DeskRealm icon on `DeskRealm.App.exe`; the tray icon uses the same embedded icon at runtime.
 
 ## Safety checklist
 

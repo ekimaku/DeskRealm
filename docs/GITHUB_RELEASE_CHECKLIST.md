@@ -30,12 +30,17 @@
   ```
 
 - [ ] Run DeskRealm manually and confirm:
+  - First-run onboarding appears before the first automatic switch on a fresh config.
+  - The UI opens from tray and hides back to tray on close.
   - Desktop switching works.
   - Name sync works.
   - Icon layout save/restore works.
   - Same icons on several realms keep separate positions.
-  - Multi-monitor / resolution / DPI variants restore correctly.
-  - Hotkeys work.
+  - Multi-monitor / resolution / DPI variants render and restore correctly.
+  - Hotkey capture works and duplicate/invalid shortcuts are rejected explicitly.
+  - **Enable realm switching automation** pauses automatic switching and DeskRealm desktop hotkeys.
+  - Layout, realm and variant locks protect saved icon positions.
+  - Variant deletion removes only DeskRealm layout metadata.
   - Startup toggle works.
   - Restore original Desktop works.
 
@@ -44,24 +49,24 @@
 Preferred helper:
 
 ```powershell
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.8 -DryRun
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.8
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.9 -DryRun
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.9
 ```
 
 Manual fallback:
 
 ```powershell
 git add -A
-git commit -m "Release DeskRealm v0.5.8"
+git commit -m "Release DeskRealm v0.5.9"
 git push origin main
-git tag -a v0.5.8 -m "DeskRealm v0.5.8"
-git push origin v0.5.8
+git tag -a v0.5.9 -m "DeskRealm v0.5.9"
+git push origin v0.5.9
 ```
 
 The GitHub Actions workflow will build and attach:
 
-- `DeskRealm-0.5.8-win-x64-portable.zip`
-- `DeskRealm-0.5.8-win-x64-install-bundle.zip`
+- `DeskRealm-0.5.9-win-x64-portable.zip`
+- `DeskRealm-0.5.9-win-x64-install-bundle.zip`
 
 ## After release
 
@@ -71,8 +76,8 @@ The GitHub Actions workflow will build and attach:
 - [ ] Update release notes from `CHANGELOG.md` if the helper did not finish:
 
   ```powershell
-  gh release edit v0.5.8 --repo ekimaku/DeskRealm --title "DeskRealm v0.5.8" --notes-file ".release-work\release-notes-v0.5.8-from-changelog.md"
+  gh release edit v0.5.9 --repo ekimaku/DeskRealm --title "DeskRealm v0.5.9" --notes-file ".release-work\release-notes-v0.5.9-from-changelog.md"
   ```
 
 - [ ] Add screenshots/GIFs to the README if desired.
-- [ ] Create follow-up issues for signed installer, UI settings window and diagnostics panel.
+- [ ] Create follow-up issues for signed installer, icon-layout diagnostics panel and branding polish.

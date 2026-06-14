@@ -15,17 +15,17 @@ internal sealed class VirtualDesktopNavigatorService
     {
         if (desktopCount < 1)
         {
-            throw new InvalidOperationException("Aucun bureau virtuel disponible pour la navigation.");
+            throw new InvalidOperationException("No virtual desktop available for navigation.");
         }
 
         if (targetNumber < 1 || targetNumber > desktopCount)
         {
-            throw new InvalidOperationException($"Bureau virtuel cible #{targetNumber} introuvable. Bureaux disponibles : 1 à {desktopCount}.");
+            throw new InvalidOperationException($"Target virtual desktop #{targetNumber} not found. Available desktops: 1 to {desktopCount}.");
         }
 
         if (currentNumber < 1 || currentNumber > desktopCount)
         {
-            throw new InvalidOperationException($"Bureau virtuel courant invalide #{currentNumber}. Bureaux disponibles : 1 à {desktopCount}.");
+            throw new InvalidOperationException($"Invalid current virtual desktop #{currentNumber}. Available desktops: 1 to {desktopCount}.");
         }
 
         var delta = targetNumber - currentNumber;

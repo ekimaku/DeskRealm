@@ -17,10 +17,10 @@ internal sealed class InitialDesktopImportForm : Form
     {
         if (desktops.Count == 0)
         {
-            throw new InvalidOperationException("Aucun bureau virtuel Windows détecté pour l'import Desktop initial.");
+            throw new InvalidOperationException("No Windows virtual desktop was detected for the initial Desktop import.");
         }
 
-        Text = "DeskRealm — Import Desktop initial";
+        Text = "DeskRealm — Initial Desktop import";
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -37,7 +37,7 @@ internal sealed class InitialDesktopImportForm : Form
             Top = 16,
             Width = 510,
             Height = 42,
-            Text = "Importer le Desktop Windows actuel dans DeskRealm ?",
+            Text = "Import the current Windows Desktop into DeskRealm?",
             Font = new Font(titleFontPrototype, FontStyle.Bold)
         };
 
@@ -48,7 +48,7 @@ internal sealed class InitialDesktopImportForm : Form
             Top = 58,
             Width = 510,
             Height = 74,
-            Text = "DeskRealm peut associer ton Desktop Windows actuel à un realm sans déplacer tes fichiers. Si DeskRealm est fermé, ton Desktop original reste intact et revient normalement.",
+            Text = "DeskRealm can associate your current Windows Desktop with a realm without moving your files. If DeskRealm is closed, your original Desktop stays intact and comes back normally.",
         };
 
         var desktopLabel = new Label
@@ -56,7 +56,7 @@ internal sealed class InitialDesktopImportForm : Form
             AutoSize = true,
             Left = 16,
             Top = 145,
-            Text = "Affecter le Desktop actuel au bureau virtuel :"
+            Text = "Assign the current Desktop to virtual desktop:"
         };
 
         _desktopCombo = new ComboBox
@@ -90,7 +90,7 @@ internal sealed class InitialDesktopImportForm : Form
             Width = 510,
             Height = 24,
             Checked = true,
-            Text = "Enregistrer la position actuelle des icônes comme layout initial"
+            Text = "Save current icon positions as the initial layout"
         };
 
         var warning = new Label
@@ -100,7 +100,7 @@ internal sealed class InitialDesktopImportForm : Form
             Top = 244,
             Width = 510,
             Height = 66,
-            Text = "Mode sûr : aucun fichier n'est déplacé. Le realm choisi pointe vers le Desktop Windows original. Les autres realms restent isolés dans le dossier DeskRealm."
+            Text = "Safe mode: no file is moved. The selected realm points to the original Windows Desktop. Other realms stay isolated inside the DeskRealm folder."
         };
 
         var importButton = new Button
@@ -109,14 +109,14 @@ internal sealed class InitialDesktopImportForm : Form
             Top = 322,
             Width = 120,
             Height = 30,
-            Text = "Associer",
+            Text = "Associate",
             DialogResult = DialogResult.OK
         };
         importButton.Click += (_, _) =>
         {
             if (_desktopCombo.SelectedItem is not DesktopChoice choice)
             {
-                MessageBox.Show("Sélectionne un bureau virtuel cible.", "DeskRealm", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Select a target virtual desktop.", "DeskRealm", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 DialogResult = DialogResult.None;
                 return;
             }
@@ -130,7 +130,7 @@ internal sealed class InitialDesktopImportForm : Form
             Top = 322,
             Width = 124,
             Height = 30,
-            Text = "Ignorer",
+            Text = "Skip",
             DialogResult = DialogResult.Cancel
         };
 

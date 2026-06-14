@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Runtime.InteropServices;
+
 namespace DeskRealm.App.Services;
 
 internal sealed class DesktopSwitchService
@@ -12,7 +15,7 @@ internal sealed class DesktopSwitchService
 
     private RealmConfig? _config;
     private Guid? _lastDesktopId;
-    private string _lastMessage = "Initialisé.";
+    private string _lastMessage = "Initialized.";
     private DateTimeOffset _lastSwitchAt = DateTimeOffset.MinValue;
     private DateTimeOffset _lastIconAutoSaveAt = DateTimeOffset.MinValue;
     private string? _lastDisplayTopologyKey;
@@ -45,7 +48,7 @@ internal sealed class DesktopSwitchService
         _logger = logger;
     }
 
-    public RealmConfig Config => _config ?? throw new InvalidOperationException("Config non initialisée.");
+    public RealmConfig Config => _config ?? throw new InvalidOperationException("Config not initialized.");
 
     public void Initialize()
     {
@@ -63,8 +66,8 @@ internal sealed class DesktopSwitchService
         if (Config.RejectOneDriveDesktop && ContainsOneDriveSegment(Config.OriginalDesktopPath!))
         {
             throw new InvalidOperationException(
-                "Desktop original détecté sous OneDrive. DeskRealm refuse ce mode par défaut. " +
-                "Désactive rejectOneDriveDesktop uniquement si tu veux assumer ce risque explicitement.");
+                "Original Desktop detected under OneDrive. DeskRealm rejects this mode by default. " +
+                "Disable rejectOneDriveDesktop only if you explicitly want to assume this risk.");
         }
 
         Directory.CreateDirectory(Config.RealmsRoot!);
@@ -77,7 +80,7 @@ internal sealed class DesktopSwitchService
             SyncAllRealmFolderNames(createIfMissing: true, reswitchCurrentDesktop: false);
         }
 
-        _lastMessage = "Config chargée.";
+        _lastMessage = "Config loaded.";
         _logger.Info($"Original Desktop: {Config.OriginalDesktopPath}");
         _logger.Info($"Realms root: {Config.RealmsRoot}");
         _logger.Info($"Realm name sync: {Config.SyncRealmNamesWithVirtualDesktopNames}");
@@ -102,7 +105,7 @@ internal sealed class DesktopSwitchService
 
         if (!Config.Enabled)
         {
-            _lastMessage = "Pause active.";
+            _lastMessage = "DeskRealm paused.";
             return;
         }
 
@@ -130,6 +133,8 @@ internal sealed class DesktopSwitchService
             Initialize();
         }
 
+        EnsureDeskRealmEnabledForOperation("Refresh now");
+
         var current = _virtualDesktop.GetCurrentVirtualDesktop();
         var realmPath = ResolveRealmPath(current, createIfMissing: true);
         SwitchTo(current, realmPath, force: true);
@@ -142,16 +147,18 @@ internal sealed class DesktopSwitchService
             Initialize();
         }
 
+        EnsureDeskRealmEnabledForOperation($"hotkey switch to desktop #{targetNumber}");
+
         var desktops = _virtualDesktop.GetVirtualDesktops();
         var target = desktops.FirstOrDefault(d => d.Number == targetNumber)
-            ?? throw new InvalidOperationException($"Bureau virtuel #{targetNumber} introuvable. Bureaux disponibles : 1 à {desktops.Count}.");
+            ?? throw new InvalidOperationException($"Virtual desktop #{targetNumber} not found. Available desktops: 1 to {desktops.Count}.");
 
         var current = _virtualDesktop.GetCurrentVirtualDesktop();
         if (current.Id == target.Id)
         {
             var currentRealmPath = ResolveRealmPath(current, createIfMissing: true);
             SwitchTo(current, currentRealmPath, force: false);
-            _lastMessage = $"Hotkey bureau #{targetNumber} ignoré : déjà sur {current.Name}.";
+            _lastMessage = $"Hotkey desktop #{targetNumber} ignored: already on {current.Name}.";
             _logger.Info(_lastMessage);
             return;
         }
@@ -163,13 +170,13 @@ internal sealed class DesktopSwitchService
         if (switched.Id != target.Id)
         {
             throw new InvalidOperationException(
-                $"Windows n'a pas confirmé le switch vers le bureau #{targetNumber} dans le délai attendu. " +
-                $"Bureau courant détecté : #{switched.Number} {switched.Name} {switched.Id:B}.");
+                $"Windows did not confirm the switch to desktop #{targetNumber} within the expected timeout. " +
+                $"Detected current desktop: #{switched.Number} {switched.Name} {switched.Id:B}.");
         }
 
         var realmPath = ResolveRealmPath(switched, createIfMissing: true);
         SwitchTo(switched, realmPath, force: true);
-        _lastMessage = $"Hotkey -> bureau #{targetNumber} {switched.Name}.";
+        _lastMessage = $"Hotkey -> desktop #{targetNumber} {switched.Name}.";
         _logger.Info(_lastMessage);
     }
 
@@ -182,6 +189,378 @@ internal sealed class DesktopSwitchService
 
         SyncAllRealmFolderNames(createIfMissing: true, reswitchCurrentDesktop: true);
     }
+
+    public bool IsCurrentLayoutLocked()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        return IsLayoutLocked(current.Id);
+    }
+
+    public bool IsCurrentLayoutVariantLocked()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        return IsCurrentVariantLocked(current.Id);
+    }
+
+    public bool IsCurrentRealmLocked()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        return IsRealmLocked(current.Id);
+    }
+
+    public bool IsCurrentLayoutOrRealmLocked()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        return IsLayoutOrRealmLocked(current.Id);
+    }
+
+    public string GetCurrentLockStatusText()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        var realmPath = ResolveRealmPath(current, createIfMissing: false);
+        var layoutLocked = IsLayoutLocked(current.Id);
+        var variantLocked = IsCurrentVariantLocked(current.Id);
+        var realmLocked = IsRealmLocked(current.Id);
+        return $"Desktop #{current.Number} {current.Name} / {Path.GetFileName(realmPath)} — variant locked: {variantLocked}, layout locked: {layoutLocked}, realm locked: {realmLocked}";
+    }
+
+    public IReadOnlyList<IconLayoutRealmSnapshot> GetIconLayoutLockSnapshot()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        var desktops = _virtualDesktop.GetVirtualDesktops().OrderBy(d => d.Number).ToList();
+        var groups = new Dictionary<string, IconLayoutRealmBuilder>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var desktop in desktops)
+        {
+            var realmPath = ResolveRealmPath(desktop, createIfMissing: true);
+            var realmName = Path.GetFileName(realmPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (string.IsNullOrWhiteSpace(realmName))
+            {
+                realmName = desktop.Name;
+            }
+
+            var realmKey = BuildRealmLockKey(realmPath);
+            if (!groups.TryGetValue(realmKey, out var builder))
+            {
+                builder = new IconLayoutRealmBuilder(realmKey, realmName, realmPath, desktop.Number);
+                groups.Add(realmKey, builder);
+            }
+
+            var layoutLocked = IsLayoutLocked(desktop.Id);
+            var realmLocked = IsRealmLocked(desktop.Id);
+            var currentTopology = desktop.Id == current.Id ? DisplayTopologyService.Capture().Key : string.Empty;
+            var variants = BuildVariantSnapshots(desktop, realmLocked, layoutLocked, currentTopology);
+            builder.Layouts.Add(new IconLayoutEntrySnapshot(
+                desktop.Id,
+                desktop.Number,
+                desktop.Name,
+                desktop.Id == current.Id,
+                layoutLocked,
+                realmLocked || layoutLocked,
+                variants.Any(v => v.HasSavedLayout),
+                variants));
+        }
+
+        return groups.Values
+            .OrderBy(g => g.RealmNumber)
+            .ThenBy(g => g.RealmName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new IconLayoutRealmSnapshot(
+                g.RealmKey,
+                g.RealmNumber,
+                g.RealmName,
+                g.RealmPath,
+                g.Layouts.Any(l => IsRealmLocked(l.DesktopId)),
+                g.Layouts.Any(l => l.IsCurrent),
+                g.Layouts.OrderBy(l => l.DesktopNumber).ToList()))
+            .ToList();
+    }
+
+    private IReadOnlyList<IconLayoutVariantSnapshot> BuildVariantSnapshots(
+        VirtualDesktopInfo desktop,
+        bool realmLocked,
+        bool layoutLocked,
+        string currentTopologyKey)
+    {
+        var fileVariants = IconLayoutPersistenceService.ReadLayoutVariantsForDesktop(desktop.Id);
+        if (fileVariants.Count == 0)
+        {
+            return
+            [
+                new IconLayoutVariantSnapshot(
+                    BuildVariantLockKey(desktop.Id, "pending-baseline"),
+                    "pending-baseline",
+                    "pending",
+                    "No saved icon layout yet",
+                    null,
+                    0,
+                    [],
+                    !string.IsNullOrWhiteSpace(currentTopologyKey),
+                    false,
+                    realmLocked || layoutLocked,
+                    false)
+            ];
+        }
+
+        return fileVariants
+            .Select(variant =>
+            {
+                var variantKey = BuildVariantLockKey(desktop.Id, variant.DisplayTopologyKey);
+                var variantLocked = IsVariantLocked(variantKey);
+                return new IconLayoutVariantSnapshot(
+                    variantKey,
+                    variant.DisplayTopologyKey,
+                    variant.DisplayTopologyFamilyKey,
+                    variant.Summary,
+                    variant.SavedAt,
+                    variant.IconCount,
+                    variant.Displays,
+                    !string.IsNullOrWhiteSpace(currentTopologyKey) && string.Equals(variant.DisplayTopologyKey, currentTopologyKey, StringComparison.OrdinalIgnoreCase),
+                    variantLocked,
+                    realmLocked || layoutLocked || variantLocked,
+                    true);
+            })
+            .ToList();
+    }
+
+    public void LockIconLayoutVariant(Guid desktopId, string displayTopologyKey)
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        if (string.IsNullOrWhiteSpace(displayTopologyKey) || string.Equals(displayTopologyKey, "pending-baseline", StringComparison.OrdinalIgnoreCase))
+        {
+            LockIconLayout(desktopId);
+            return;
+        }
+
+        var desktop = FindVirtualDesktopOrThrow(desktopId);
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        if (desktop.Id == current.Id && !IsLayoutOrRealmLocked(desktop.Id))
+        {
+            var active = GetActiveCurrentRealmOrThrow("variant lock");
+            SaveCurrentIconLayoutBaseline(active.Desktop, active.RealmName, "variant-lock-baseline");
+        }
+
+        var key = BuildVariantLockKey(desktop.Id, displayTopologyKey);
+        Config.LockedIconLayoutVariants[key] = true;
+        _configService.Save(Config);
+        _lastMessage = $"Icon layout variant locked: {desktop.Name}";
+        _logger.Info($"{_lastMessage} ({displayTopologyKey})");
+    }
+
+    public void UnlockIconLayoutVariant(Guid desktopId, string displayTopologyKey)
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        if (string.IsNullOrWhiteSpace(displayTopologyKey) || string.Equals(displayTopologyKey, "pending-baseline", StringComparison.OrdinalIgnoreCase))
+        {
+            UnlockIconLayout(desktopId);
+            return;
+        }
+
+        var desktop = FindVirtualDesktopOrThrow(desktopId);
+        var key = BuildVariantLockKey(desktop.Id, displayTopologyKey);
+        Config.LockedIconLayoutVariants.Remove(key);
+        _configService.Save(Config);
+        _lastMessage = $"Icon layout variant unlocked: {desktop.Name}";
+        _logger.Info($"{_lastMessage} ({displayTopologyKey})");
+    }
+
+    public void DeleteIconLayoutVariant(Guid desktopId, string displayTopologyKey)
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        if (string.IsNullOrWhiteSpace(displayTopologyKey) || string.Equals(displayTopologyKey, "pending-baseline", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Cannot delete an icon layout variant that has not been saved yet.");
+        }
+
+        var desktop = FindVirtualDesktopOrThrow(desktopId);
+        var persistence = new IconLayoutPersistenceService(new DesktopIconShellService(_logger), _logger);
+        persistence.DeleteVariant(desktop.Id, displayTopologyKey);
+
+        Config.LockedIconLayoutVariants.Remove(BuildVariantLockKey(desktop.Id, displayTopologyKey));
+        _configService.Save(Config);
+
+        _lastMessage = $"Icon layout variant deleted: {desktop.Name}";
+        _logger.Info($"{_lastMessage} ({displayTopologyKey})");
+    }
+
+    public void LockCurrentIconLayout()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        LockIconLayout(current.Id);
+    }
+
+    public void UnlockCurrentIconLayout()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        UnlockIconLayout(current.Id);
+    }
+
+    public void LockCurrentRealmLayouts()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        LockRealmLayoutsForDesktop(current.Id);
+    }
+
+    public void UnlockCurrentRealmLayouts()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        UnlockRealmLayoutsForDesktop(current.Id);
+    }
+
+    public void LockIconLayout(Guid desktopId)
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var desktop = FindVirtualDesktopOrThrow(desktopId);
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        if (desktop.Id == current.Id && !IsLayoutOrRealmLocked(desktop.Id))
+        {
+            var active = GetActiveCurrentRealmOrThrow("layout lock");
+            SaveCurrentIconLayoutBaseline(active.Desktop, active.RealmName, "layout-lock-baseline");
+        }
+        else if (desktop.Id != current.Id)
+        {
+            _logger.Info($"Layout lock marked for non-current desktop; existing saved layout will be protected, and a baseline will be captured on first visit if none exists: {desktop.Name} {desktop.Id:B}.");
+        }
+        else
+        {
+            _logger.Info($"Layout lock requested while already protected; baseline not overwritten: {desktop.Name} {desktop.Id:B}.");
+        }
+
+        Config.LockedIconLayouts[desktop.Id.ToString("B")] = true;
+        _configService.Save(Config);
+        _lastMessage = $"Layout locked: {desktop.Name}";
+        _logger.Info(_lastMessage);
+    }
+
+    public void UnlockIconLayout(Guid desktopId)
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var desktop = FindVirtualDesktopOrThrow(desktopId);
+        Config.LockedIconLayouts.Remove(desktop.Id.ToString("B"));
+        _configService.Save(Config);
+        _lastMessage = $"Layout unlocked: {desktop.Name}";
+        _logger.Info(_lastMessage);
+    }
+
+    public void LockRealmLayoutsForDesktop(Guid desktopId)
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var desktop = FindVirtualDesktopOrThrow(desktopId);
+        var realmPath = ResolveRealmPath(desktop, createIfMissing: true);
+        var realmKey = BuildRealmLockKey(realmPath);
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        if (desktop.Id == current.Id && !IsLayoutOrRealmLocked(desktop.Id))
+        {
+            var active = GetActiveCurrentRealmOrThrow("realm lock");
+            SaveCurrentIconLayoutBaseline(active.Desktop, active.RealmName, "realm-lock-baseline");
+        }
+        else if (desktop.Id != current.Id)
+        {
+            _logger.Info($"Realm lock marked from non-current desktop; all layouts assigned to this realm are now protected: {realmPath}.");
+        }
+        else
+        {
+            _logger.Info($"Realm lock requested while already protected; baseline not overwritten: {realmPath}.");
+        }
+
+        Config.LockedRealms[realmKey] = true;
+        RemoveLegacyRealmLockGuidsForRealm(realmKey);
+        _configService.Save(Config);
+        _lastMessage = $"Realm locked: {Path.GetFileName(realmPath)}";
+        _logger.Info(_lastMessage);
+    }
+
+    public void UnlockRealmLayoutsForDesktop(Guid desktopId)
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var desktop = FindVirtualDesktopOrThrow(desktopId);
+        var realmPath = ResolveRealmPath(desktop, createIfMissing: true);
+        var realmKey = BuildRealmLockKey(realmPath);
+        Config.LockedRealms.Remove(realmKey);
+        Config.LockedRealms.Remove(desktop.Id.ToString("B"));
+        RemoveLegacyRealmLockGuidsForRealm(realmKey);
+        _configService.Save(Config);
+        _lastMessage = $"Realm unlocked: {Path.GetFileName(realmPath)}";
+        _logger.Info(_lastMessage);
+    }
+
 
 
 
@@ -221,14 +600,76 @@ internal sealed class DesktopSwitchService
 
     public void MarkInitialDesktopImportSkipped()
     {
+        _ = SkipInitialDesktopImportAndCreateOriginalDesktopShortcuts();
+    }
+
+    public int SkipInitialDesktopImportAndCreateOriginalDesktopShortcuts()
+    {
         if (_config is null)
         {
             Initialize();
         }
 
+        var created = CreateOriginalDesktopShortcutsInManagedRealms();
         Config.InitialDesktopImportPromptCompleted = true;
+        Config.InitialDesktopImportMoveFiles = false;
         _configService.Save(Config);
-        _logger.Info("Initial Desktop import skipped by user.");
+        _lastMessage = $"Initial Desktop import skipped. Original Desktop shortcuts created: {created}.";
+        _logger.Info(_lastMessage);
+        return created;
+    }
+
+    public int CreateOriginalDesktopShortcutsInManagedRealms()
+    {
+        if (_config is null)
+        {
+            Initialize();
+        }
+
+        var originalDesktop = Config.OriginalDesktopPath
+            ?? throw new InvalidOperationException("originalDesktopPath is missing from config.");
+
+        if (!Directory.Exists(originalDesktop))
+        {
+            throw new DirectoryNotFoundException($"Original Desktop not found: {originalDesktop}");
+        }
+
+        var realmsRoot = Config.RealmsRoot
+            ?? throw new InvalidOperationException("realmsRoot is missing from config.");
+
+        Directory.CreateDirectory(realmsRoot);
+
+        var created = 0;
+        var desktops = _virtualDesktop.GetVirtualDesktops();
+        foreach (var desktop in desktops.OrderBy(d => d.Number))
+        {
+            var realmPath = ResolveRealmPath(desktop, createIfMissing: true);
+            if (PathsEqual(realmPath, originalDesktop))
+            {
+                _logger.Info($"Original Desktop shortcut skipped for {desktop.Name}: realm is the original Desktop ({realmPath}).");
+                continue;
+            }
+
+            if (!IsPathInsideOrEqual(realmPath, realmsRoot))
+            {
+                _logger.Info($"Original Desktop shortcut skipped for {desktop.Name}: realm is external to DeskRealm root ({realmPath}).");
+                continue;
+            }
+
+            Directory.CreateDirectory(realmPath);
+            var shortcutPath = Path.Combine(realmPath, "DeskRealm - Original Desktop.lnk");
+            CreateFolderShortcut(shortcutPath, originalDesktop, "Open the original Windows Desktop captured before DeskRealm switching.");
+            created++;
+            _logger.Info($"Original Desktop shortcut created: {shortcutPath} -> {originalDesktop}");
+        }
+
+        if (created == 0)
+        {
+            throw new InvalidOperationException("No original Desktop shortcut was created: no DeskRealm-managed realm was available.");
+        }
+
+        _lastMessage = $"Original Desktop shortcuts created: {created}.";
+        return created;
     }
 
     public void ImportOriginalDesktopToVirtualDesktop(Guid targetDesktopId, bool linkOriginalDesktop, bool saveLayout)
@@ -241,28 +682,28 @@ internal sealed class DesktopSwitchService
         if (!linkOriginalDesktop)
         {
             throw new InvalidOperationException(
-                "Import Desktop initial refusé : DeskRealm ne déplace plus les fichiers du Desktop original. " +
-                "Le mode supporté est l'association du Desktop original à un realm.");
+                "Initial Desktop import refused: DeskRealm no longer moves files from the original Desktop. " +
+                "The supported mode is associating the original Desktop with a realm.");
         }
 
         var originalDesktop = Config.OriginalDesktopPath
-            ?? throw new InvalidOperationException("originalDesktopPath absent dans la config.");
+            ?? throw new InvalidOperationException("originalDesktopPath is missing from config.");
 
         if (!Directory.Exists(originalDesktop))
         {
-            throw new DirectoryNotFoundException($"Desktop original introuvable : {originalDesktop}");
+            throw new DirectoryNotFoundException($"Original Desktop not found: {originalDesktop}");
         }
 
         var knownDesktop = _knownFolder.GetDesktopPath();
         if (!PathsEqual(knownDesktop, originalDesktop))
         {
             throw new InvalidOperationException(
-                "Import Desktop initial refusé : le Desktop connu actif n'est plus le Desktop original. " +
-                $"Attendu : {originalDesktop}. Actuel : {knownDesktop}.");
+                "Initial Desktop import refused: the active known Desktop is no longer the original Desktop. " +
+                $"Expected: {originalDesktop}. Current: {knownDesktop}.");
         }
 
         var targetDesktop = _virtualDesktop.GetVirtualDesktops().FirstOrDefault(d => d.Id == targetDesktopId)
-            ?? throw new InvalidOperationException($"Bureau virtuel cible introuvable : {targetDesktopId:B}");
+            ?? throw new InvalidOperationException($"Target virtual desktop not found: {targetDesktopId:B}");
 
         EnsureOriginalDesktopNotAssignedToAnotherDesktop(targetDesktop.Id, originalDesktop);
 
@@ -287,13 +728,13 @@ internal sealed class DesktopSwitchService
         }
 
         _lastDesktopId = null;
-        _lastMessage = $"Desktop original associé à {targetDesktop.Name} sans déplacement de fichiers.";
+        _lastMessage = $"Original Desktop associated with {targetDesktop.Name} without moving files.";
         _logger.Info(
             $"Initial Desktop import completed: target={targetDesktop.Name} {targetDesktop.Id:B}, " +
             $"mode=link-original-desktop, original={originalDesktop}, previousAssignment={previousAssignment}, saveLayout={saveLayout}.");
     }
 
-    public void SaveIconLayoutNow()
+    public void SaveIconLayoutNow(bool overwriteLockedLayout = false)
     {
         if (_config is null)
         {
@@ -305,15 +746,27 @@ internal sealed class DesktopSwitchService
         if (!TryFindAssignmentByRealmPath(knownDesktop, out var desktopId, out var realmName))
         {
             throw new InvalidOperationException(
-                "Impossible de sauvegarder le layout icônes : le Desktop connu actif ne correspond à aucun realm DeskRealm assigné. " +
-                $"Desktop actif : {knownDesktop}");
+                "Cannot save icon layout: the active known Desktop does not match any assigned DeskRealm realm. " +
+                $"Active Desktop: {knownDesktop}");
         }
 
         EnsureKnownDesktopAssignmentIsCurrentDesktop(desktopId, realmName, "manual-save");
         EnsureIconLayoutsNotDisabledForSession();
+        if (IsLayoutOrRealmLocked(desktopId))
+        {
+            if (!overwriteLockedLayout)
+            {
+                throw new InvalidOperationException(
+                    "Locked layout: a manual save would overwrite protected positions. " +
+                    "Confirm the overwrite explicitly from the DeskRealm UI.");
+            }
+
+            _logger.Warn($"Locked icon layout manual overwrite confirmed: {realmName} {desktopId:B}.");
+        }
+
         _iconLayouts.Save(desktopId, realmName, Config.IconLayoutWorkerTimeoutMs);
         _lastIconAutoSaveAt = DateTimeOffset.Now;
-        _lastMessage = $"Layout icônes sauvegardé : {realmName}";
+        _lastMessage = $"Icon layout saved: {realmName}";
         _logger.Info(_lastMessage);
     }
 
@@ -332,8 +785,8 @@ internal sealed class DesktopSwitchService
         if (!PathsEqual(knownDesktop, realmPath))
         {
             throw new InvalidOperationException(
-                "Impossible de restaurer le layout icônes : le Desktop connu actif n'est pas le realm du bureau virtuel courant. " +
-                $"Attendu : {realmPath}. Actuel : {knownDesktop}. Lance d'abord Refresh now.");
+                "Cannot restore icon layout: the active known Desktop is not the current virtual desktop realm. " +
+                $"Expected: {realmPath}. Current: {knownDesktop}. Run Refresh now first.");
         }
 
         EnsureIconLayoutsNotDisabledForSession();
@@ -344,15 +797,23 @@ internal sealed class DesktopSwitchService
 
         var realmName = Path.GetFileName(realmPath);
         _iconLayouts.Restore(current.Id, realmName, Config.IconLayoutWorkerTimeoutMs);
-        _lastMessage = $"Layout icônes restauré : {Path.GetFileName(realmPath)}";
+        _lastMessage = $"Icon layout restored: {Path.GetFileName(realmPath)}";
         _logger.Info(_lastMessage);
+    }
+
+    private void EnsureDeskRealmEnabledForOperation(string operation)
+    {
+        if (!Config.Enabled)
+        {
+            throw new InvalidOperationException($"DeskRealm is disabled. Enable realm switching automation before running: {operation}.");
+        }
     }
 
     public void SetEnabled(bool enabled)
     {
         Config.Enabled = enabled;
         _configService.Save(Config);
-        _lastMessage = enabled ? "Reprise active." : "Pause active.";
+        _lastMessage = enabled ? "Realm switching automation enabled." : "Realm switching automation paused.";
         _logger.Info(_lastMessage);
     }
 
@@ -361,11 +822,11 @@ internal sealed class DesktopSwitchService
         SaveIconLayoutForKnownDesktopIfRealm(_knownFolder.GetDesktopPath(), "restore-original/save-before-restore");
 
         var original = Config.OriginalDesktopPath
-            ?? throw new InvalidOperationException("originalDesktopPath absent dans la config.");
+            ?? throw new InvalidOperationException("originalDesktopPath is missing from config.");
 
         if (!Directory.Exists(original))
         {
-            throw new DirectoryNotFoundException($"Desktop original introuvable : {original}");
+            throw new DirectoryNotFoundException($"Original Desktop not found: {original}");
         }
 
         _knownFolder.SetDesktopPath(original);
@@ -373,81 +834,95 @@ internal sealed class DesktopSwitchService
         ClearPendingIconRestore();
         _lastDesktopId = null;
         _lastSwitchAt = DateTimeOffset.Now;
-        _lastMessage = $"Desktop original restauré : {original}";
+        _lastMessage = $"Original Desktop restored: {original}";
         _logger.Info(_lastMessage);
     }
 
 
-
-    private void EnsureInitialImportCanMove(string originalDesktop, string targetRealmPath, bool moveFiles)
+    private (VirtualDesktopInfo Desktop, string RealmPath, string RealmName) GetActiveCurrentRealmOrThrow(string operation)
     {
-        if (!moveFiles)
+        EnsureIconLayoutPersistenceEnabled();
+        EnsureIconLayoutsNotDisabledForSession();
+
+        var current = _virtualDesktop.GetCurrentVirtualDesktop();
+        var realmPath = ResolveRealmPath(current, createIfMissing: true);
+        var knownDesktop = _knownFolder.GetDesktopPath();
+
+        if (!PathsEqual(knownDesktop, realmPath))
         {
-            return;
+            throw new InvalidOperationException(
+                $"Cannot perform operation '{operation}': the active known Desktop is not the current virtual desktop realm. " +
+                $"Expected: {realmPath}. Current: {knownDesktop}. Run Refresh now first.");
         }
 
-        foreach (var source in EnumerateInitialDesktopImportCandidates(originalDesktop, targetRealmPath))
+        var key = current.Id.ToString("B");
+        var realmName = Config.Assignments.TryGetValue(key, out var assignment)
+            ? GetAssignmentDisplayName(assignment)
+            : Path.GetFileName(realmPath);
+
+        return (current, realmPath, realmName);
+    }
+
+    private void SaveCurrentIconLayoutBaseline(VirtualDesktopInfo desktop, string realmName, string reason)
+    {
+        if (Config.IconLayoutSettleDelayMs > 0)
         {
-            var target = Path.Combine(targetRealmPath, Path.GetFileName(source));
-            if (File.Exists(target) || Directory.Exists(target))
+            Thread.Sleep(Config.IconLayoutSettleDelayMs);
+        }
+
+        _iconLayouts.Save(desktop.Id, realmName, Config.IconLayoutWorkerTimeoutMs);
+        _lastIconAutoSaveAt = DateTimeOffset.Now;
+        _logger.Info($"Icon layout baseline saved for lock ({reason}): {realmName} {desktop.Id:B}");
+    }
+
+
+    private static void CreateFolderShortcut(string shortcutPath, string targetPath, string description)
+    {
+        object? shell = null;
+        object? shortcut = null;
+
+        try
+        {
+            var shellType = Type.GetTypeFromProgID("WScript.Shell")
+                ?? throw new InvalidOperationException("WScript.Shell unavailable: cannot create a Windows .lnk shortcut.");
+
+            shell = Activator.CreateInstance(shellType)
+                ?? throw new InvalidOperationException("Cannot create WScript.Shell: empty COM instance.");
+
+            shortcut = shellType.InvokeMember(
+                "CreateShortcut",
+                BindingFlags.InvokeMethod,
+                binder: null,
+                target: shell,
+                args: new object[] { shortcutPath })
+                ?? throw new InvalidOperationException($"Cannot create shortcut: {shortcutPath}");
+
+            var shortcutType = shortcut.GetType();
+            shortcutType.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { targetPath });
+            shortcutType.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { targetPath });
+            shortcutType.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut, new object[] { description });
+            shortcutType.InvokeMember("IconLocation", BindingFlags.SetProperty, null, shortcut, new object[] { @"%SystemRoot%\System32\imageres.dll,3" });
+            shortcutType.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
+        }
+        finally
+        {
+            if (shortcut is not null && Marshal.IsComObject(shortcut))
             {
-                throw new IOException(
-                    "Import Desktop initial refusé : conflit de nom détecté dans le realm cible. " +
-                    $"Source : {source}. Cible existante : {target}. " +
-                    "Renomme ou déplace l'élément manuellement, puis relance l'import.");
+                Marshal.FinalReleaseComObject(shortcut);
+            }
+
+            if (shell is not null && Marshal.IsComObject(shell))
+            {
+                Marshal.FinalReleaseComObject(shell);
             }
         }
     }
 
-    private int MoveInitialDesktopItems(string originalDesktop, string targetRealmPath)
+    private static bool IsPathInsideOrEqual(string candidatePath, string rootPath)
     {
-        Directory.CreateDirectory(targetRealmPath);
-        var moved = 0;
-        foreach (var source in EnumerateInitialDesktopImportCandidates(originalDesktop, targetRealmPath))
-        {
-            var target = Path.Combine(targetRealmPath, Path.GetFileName(source));
-            if (Directory.Exists(source))
-            {
-                Directory.Move(source, target);
-            }
-            else
-            {
-                File.Move(source, target);
-            }
-
-            moved++;
-            _logger.Info($"Initial Desktop import moved: {source} -> {target}");
-        }
-
-        return moved;
-    }
-
-    private IEnumerable<string> EnumerateInitialDesktopImportCandidates(string originalDesktop, string targetRealmPath)
-    {
-        var realmsRoot = Config.RealmsRoot ?? string.Empty;
-        foreach (var entry in Directory.EnumerateFileSystemEntries(originalDesktop))
-        {
-            var name = Path.GetFileName(entry);
-            if (string.Equals(name, "desktop.ini", StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.Info($"Initial Desktop import skips desktop.ini: {entry}");
-                continue;
-            }
-
-            if (!string.IsNullOrWhiteSpace(realmsRoot) && PathsEqual(entry, realmsRoot))
-            {
-                _logger.Info($"Initial Desktop import skips DeskRealm realms root: {entry}");
-                continue;
-            }
-
-            if (PathsEqual(entry, targetRealmPath))
-            {
-                _logger.Info($"Initial Desktop import skips target realm path: {entry}");
-                continue;
-            }
-
-            yield return entry;
-        }
+        var candidate = Path.GetFullPath(candidatePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var root = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return candidate.StartsWith(root, StringComparison.OrdinalIgnoreCase) || string.Equals(candidate, root, StringComparison.OrdinalIgnoreCase);
     }
 
     public DesktopSwitchStatus GetStatus()
@@ -521,7 +996,7 @@ internal sealed class DesktopSwitchService
         if (!force && string.Equals(currentKnownDesktop, realmPath, StringComparison.OrdinalIgnoreCase))
         {
             _lastDesktopId = desktop.Id;
-            _lastMessage = $"Déjà sur {desktop.Name} -> {Path.GetFileName(realmPath)}";
+            _lastMessage = $"Already on {desktop.Name} -> {Path.GetFileName(realmPath)}";
             return;
         }
 
@@ -561,7 +1036,7 @@ internal sealed class DesktopSwitchService
         {
             if (!Directory.Exists(realmName))
             {
-                throw new DirectoryNotFoundException($"Realm externe absent : {realmName}");
+                throw new DirectoryNotFoundException($"External realm missing : {realmName}");
             }
 
             return realmName;
@@ -580,7 +1055,7 @@ internal sealed class DesktopSwitchService
 
         if (!Directory.Exists(realmPath))
         {
-            throw new DirectoryNotFoundException($"Realm absent : {realmPath}");
+            throw new DirectoryNotFoundException($"Realm missing : {realmPath}");
         }
 
         return realmPath;
@@ -614,9 +1089,9 @@ internal sealed class DesktopSwitchService
         if (currentExists && desiredExists)
         {
             throw new InvalidOperationException(
-                "Conflit de renommage realm. " +
-                $"DeskRealm voulait renommer '{currentPath}' vers '{desiredPath}', mais le dossier cible existe déjà. " +
-                "Renomme ou fusionne manuellement un des deux dossiers, puis relance Sync names now.");
+                "Realm rename conflict. " +
+                $"DeskRealm wanted to rename '{currentPath}' to '{desiredPath}', but the target folder already exists. " +
+                "Rename or merge one of the folders manually, then run Sync names now again.");
         }
 
         if (currentExists)
@@ -642,7 +1117,7 @@ internal sealed class DesktopSwitchService
         Config.Assignments[key] = desiredRealmName;
         _configService.Save(Config);
         _lastDesktopId = null;
-        _lastMessage = $"Nom synchronisé : {desktop.Name} -> {desiredRealmName}";
+        _lastMessage = $"Name synchronized: {desktop.Name} -> {desiredRealmName}";
         return desiredRealmName;
     }
 
@@ -650,7 +1125,7 @@ internal sealed class DesktopSwitchService
     {
         if (!Config.SyncRealmNamesWithVirtualDesktopNames)
         {
-            _lastMessage = "Sync noms ignoré : option désactivée.";
+            _lastMessage = "Name sync ignored: option disabled.";
             _logger.Info(_lastMessage);
             return;
         }
@@ -668,7 +1143,7 @@ internal sealed class DesktopSwitchService
             SwitchTo(current, realmPath, force: true);
         }
 
-        _lastMessage = "Noms des realms synchronisés avec Win+Tab.";
+        _lastMessage = "Realm names synchronized with Win+Tab.";
         _logger.Info(_lastMessage);
     }
 
@@ -681,11 +1156,11 @@ internal sealed class DesktopSwitchService
         }
 
         var original = Config.OriginalDesktopPath
-            ?? throw new InvalidOperationException("originalDesktopPath absent dans la config.");
+            ?? throw new InvalidOperationException("originalDesktopPath is missing from config.");
 
         if (!Directory.Exists(original))
         {
-            throw new DirectoryNotFoundException($"Desktop original introuvable : {original}");
+            throw new DirectoryNotFoundException($"Original Desktop not found: {original}");
         }
 
         _logger.Info($"Active realm folder rename detected. Temporary Desktop restore before folder rename -> {desiredRealmName}");
@@ -718,7 +1193,7 @@ internal sealed class DesktopSwitchService
         _lastDisplayTopologyKey = topology.Key;
         _lastDisplayTopologyChangedAt = DateTimeOffset.Now;
         _displayTopologyRestorePending = true;
-        _lastMessage = "Topologie écran modifiée : restauration layout icônes en attente.";
+        _lastMessage = "Display topology changed: icon layout restore pending.";
         _logger.Warn(
             $"Display topology changed ({reason}): {topology.Key} " +
             $"({topology.Screens.Count} screen(s), virtual={topology.VirtualBoundsWidth}x{topology.VirtualBoundsHeight}). " +
@@ -766,7 +1241,7 @@ internal sealed class DesktopSwitchService
         _logger.Info($"Display topology settled after {elapsedMs:0} ms. Restoring current realm icon layout before any future save.");
         RestoreIconLayoutForDesktop(current, realmPath);
         _displayTopologyRestorePending = false;
-        _lastMessage = "Topologie écran stabilisée : layout icônes restauré.";
+        _lastMessage = "Display topology stabilized: icon layout restored.";
     }
 
     private void SaveIconLayoutForKnownDesktopIfRealm(string knownDesktopPath, string reason = "switch-save")
@@ -806,6 +1281,14 @@ internal sealed class DesktopSwitchService
                 return;
             }
 
+            if (IsLayoutOrRealmLocked(desktopId))
+            {
+                _iconLayouts.SaveLockedMergeNewIcons(desktopId, realmName, Config.IconLayoutWorkerTimeoutMs);
+                _lastIconAutoSaveAt = DateTimeOffset.Now;
+                _logger.Info($"Icon layout {reason} locked/merge checked: {realmName} {desktopId:B}");
+                return;
+            }
+
             _iconLayouts.SaveIfChanged(desktopId, realmName, Config.IconLayoutWorkerTimeoutMs);
             _lastIconAutoSaveAt = DateTimeOffset.Now;
             _logger.Info($"Icon layout {reason} checked/saved: {realmName} {desktopId:B}");
@@ -840,10 +1323,10 @@ internal sealed class DesktopSwitchService
 
         var currentDesktop = _virtualDesktop.GetCurrentVirtualDesktop();
         throw new InvalidOperationException(
-            "Sauvegarde layout icônes refusée : le Desktop connu actif appartient au realm " +
-            $"'{realmName}' {assignedDesktopId:B}, mais le bureau virtuel Windows courant est " +
+            "Icon layout save refused: the active known Desktop belongs to realm " +
+            $"'{realmName}' {assignedDesktopId:B}, but the current Windows virtual desktop is " +
             $"'{currentDesktop.Name}' {currentDesktop.Id:B}. " +
-            "Attends que DeskRealm ait terminé le switch, puis utilise Save icon layout now depuis le realm actif.");
+            "Wait until DeskRealm has completed the switch, then use Save icon layout now from the active realm.");
     }
 
     private void ScheduleIconLayoutRestore(VirtualDesktopInfo desktop, string realmPath, string reason)
@@ -973,7 +1456,7 @@ internal sealed class DesktopSwitchService
     {
         _iconLayoutsDisabledForSession = true;
         _iconLayoutsDisabledReason = $"{operation}: {ex.Message}";
-        _lastMessage = "Persistance icônes désactivée pour cette session : " + _iconLayoutsDisabledReason;
+        _lastMessage = "Icon persistence disabled for this session: " + _iconLayoutsDisabledReason;
         _logger.Error("Icon layout persistence failed. DeskRealm disables icon layout persistence for the current session, but keeps desktop switching alive.", ex);
     }
 
@@ -989,7 +1472,7 @@ internal sealed class DesktopSwitchService
 
             if (!Guid.TryParse(assignment.Key, out desktopId))
             {
-                throw new InvalidOperationException($"Assignment GUID invalide dans la config : {assignment.Key}");
+                throw new InvalidOperationException($"Invalid assignment GUID in config: {assignment.Key}");
             }
 
             realmName = GetAssignmentDisplayName(assignment.Value);
@@ -1042,9 +1525,92 @@ internal sealed class DesktopSwitchService
             if (IsAbsoluteRealmAssignment(assignment.Value) && PathsEqual(assignment.Value, originalDesktop))
             {
                 throw new InvalidOperationException(
-                    "Import Desktop initial refusé : le Desktop original est déjà associé à un autre bureau virtuel. " +
-                    $"Assignment existante : {assignment.Key} -> {assignment.Value}.");
+                    "Initial Desktop import refused: the original Desktop is already associated with another virtual desktop. " +
+                    $"Existing assignment: {assignment.Key} -> {assignment.Value}.");
             }
+        }
+    }
+
+    private bool IsLayoutLocked(Guid desktopId)
+    {
+        return Config.LockedIconLayouts.TryGetValue(desktopId.ToString("B"), out var locked) && locked;
+    }
+
+    private bool IsRealmLocked(Guid desktopId)
+    {
+        if (Config.LockedRealms.TryGetValue(desktopId.ToString("B"), out var legacyLocked) && legacyLocked)
+        {
+            return true;
+        }
+
+        if (!TryBuildRealmLockKey(desktopId, out var realmKey))
+        {
+            return false;
+        }
+
+        return Config.LockedRealms.TryGetValue(realmKey, out var locked) && locked;
+    }
+
+    private bool IsLayoutOrRealmLocked(Guid desktopId)
+    {
+        return IsLayoutLocked(desktopId) || IsCurrentVariantLocked(desktopId) || IsRealmLocked(desktopId);
+    }
+
+    private bool IsCurrentVariantLocked(Guid desktopId)
+    {
+        var topology = DisplayTopologyService.Capture();
+        return IsVariantLocked(BuildVariantLockKey(desktopId, topology.Key));
+    }
+
+    private bool IsVariantLocked(string variantKey)
+    {
+        return Config.LockedIconLayoutVariants.TryGetValue(variantKey, out var locked) && locked;
+    }
+
+    private static string BuildVariantLockKey(Guid desktopId, string displayTopologyKey)
+    {
+        if (string.IsNullOrWhiteSpace(displayTopologyKey))
+        {
+            throw new InvalidOperationException("Cannot build icon layout variant lock key: display topology key is empty.");
+        }
+
+        return desktopId.ToString("B") + "|" + displayTopologyKey.Trim();
+    }
+
+    private VirtualDesktopInfo FindVirtualDesktopOrThrow(Guid desktopId)
+    {
+        return _virtualDesktop.GetVirtualDesktops().FirstOrDefault(d => d.Id == desktopId)
+            ?? throw new InvalidOperationException($"Virtual desktop not found: {desktopId:B}.");
+    }
+
+    private bool TryBuildRealmLockKey(Guid desktopId, out string realmKey)
+    {
+        var key = desktopId.ToString("B");
+        if (!Config.Assignments.TryGetValue(key, out var assignment) || string.IsNullOrWhiteSpace(assignment))
+        {
+            realmKey = string.Empty;
+            return false;
+        }
+
+        realmKey = BuildRealmLockKey(ResolveAssignmentToPath(assignment));
+        return true;
+    }
+
+    private static string BuildRealmLockKey(string realmPath)
+    {
+        return Path.GetFullPath(realmPath.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToUpperInvariant();
+    }
+
+    private void RemoveLegacyRealmLockGuidsForRealm(string realmKey)
+    {
+        var matchingDesktopIds = Config.Assignments
+            .Where(a => string.Equals(BuildRealmLockKey(ResolveAssignmentToPath(a.Value)), realmKey, StringComparison.OrdinalIgnoreCase))
+            .Select(a => a.Key)
+            .ToList();
+
+        foreach (var matchingDesktopId in matchingDesktopIds)
+        {
+            Config.LockedRealms.Remove(matchingDesktopId);
         }
     }
 
@@ -1052,7 +1618,7 @@ internal sealed class DesktopSwitchService
     {
         if (!Config.IconLayoutPersistenceEnabled)
         {
-            throw new InvalidOperationException("La persistance des positions d'icônes est désactivée dans la config.");
+            throw new InvalidOperationException("Icon layout persistence is disabled in config.");
         }
     }
 
@@ -1061,8 +1627,8 @@ internal sealed class DesktopSwitchService
         if (_iconLayoutsDisabledForSession)
         {
             throw new InvalidOperationException(
-                "La persistance des positions d'icônes a été désactivée pour cette session après une erreur worker. " +
-                "Redémarre DeskRealm après correction pour réessayer. Dernière erreur : " + _iconLayoutsDisabledReason);
+                "Icon layout persistence has been disabled for this session after a worker error. " +
+                "Restart DeskRealm after fixing the issue to try again. Last error: " + _iconLayoutsDisabledReason);
         }
     }
 
@@ -1092,8 +1658,8 @@ internal sealed class DesktopSwitchService
         if (!string.IsNullOrWhiteSpace(existing.Key))
         {
             throw new InvalidOperationException(
-                $"Nom de realm déjà assigné : '{realmName}' est déjà lié au bureau virtuel {existing.Key}. " +
-                "DeskRealm ne résout pas les doublons silencieusement. Renomme un des bureaux dans Win+Tab.");
+                $"Realm name already assigned: '{realmName}' is already linked to virtual desktop {existing.Key}. " +
+                "DeskRealm does not resolve duplicates silently. Rename one of the desktops in Win+Tab.");
         }
     }
 
@@ -1144,4 +1710,53 @@ internal sealed class DesktopSwitchService
             Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
             StringComparison.OrdinalIgnoreCase);
     }
+}
+
+internal sealed record IconLayoutRealmSnapshot(
+    string RealmKey,
+    int RealmNumber,
+    string RealmName,
+    string RealmPath,
+    bool IsLocked,
+    bool ContainsCurrent,
+    IReadOnlyList<IconLayoutEntrySnapshot> Layouts);
+
+internal sealed record IconLayoutEntrySnapshot(
+    Guid DesktopId,
+    int DesktopNumber,
+    string DesktopName,
+    bool IsCurrent,
+    bool IsLayoutLocked,
+    bool EffectiveLocked,
+    bool HasSavedLayout,
+    IReadOnlyList<IconLayoutVariantSnapshot> Variants);
+
+internal sealed record IconLayoutVariantSnapshot(
+    string VariantKey,
+    string DisplayTopologyKey,
+    string DisplayTopologyFamilyKey,
+    string Summary,
+    DateTimeOffset? SavedAt,
+    int IconCount,
+    IReadOnlyList<IconLayoutDisplayFileSnapshot> Displays,
+    bool IsCurrentTopology,
+    bool IsVariantLocked,
+    bool EffectiveLocked,
+    bool HasSavedLayout);
+
+internal sealed class IconLayoutRealmBuilder
+{
+    public IconLayoutRealmBuilder(string realmKey, string realmName, string realmPath, int realmNumber)
+    {
+        RealmKey = realmKey;
+        RealmName = realmName;
+        RealmPath = realmPath;
+        RealmNumber = realmNumber;
+    }
+
+    public string RealmKey { get; }
+    public string RealmName { get; }
+    public string RealmPath { get; }
+    public int RealmNumber { get; }
+    public List<IconLayoutEntrySnapshot> Layouts { get; } = [];
 }

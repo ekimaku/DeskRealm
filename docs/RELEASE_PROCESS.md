@@ -13,18 +13,18 @@ A pushed tag matching `v*` creates a GitHub Release and attaches the release ass
 Recommended local helper command:
 
 ```powershell
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.8 -DryRun
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.8
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.9 -DryRun
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.9
 ```
 
 Manual release flow:
 
 ```powershell
 git add -A
-git commit -m "Release DeskRealm v0.5.8"
+git commit -m "Release DeskRealm v0.5.9"
 git push origin main
-git tag -a v0.5.8 -m "DeskRealm v0.5.8"
-git push origin v0.5.8
+git tag -a v0.5.9 -m "DeskRealm v0.5.9"
+git push origin v0.5.9
 ```
 
 The `Build and release` workflow will:
@@ -47,7 +47,7 @@ The `Build and release` workflow will:
 Manual update after the workflow succeeds:
 
 ```powershell
-gh release edit v0.5.8 --repo ekimaku/DeskRealm --title "DeskRealm v0.5.8" --notes-file ".release-work\release-notes-v0.5.8-from-changelog.md"
+gh release edit v0.5.9 --repo ekimaku/DeskRealm --title "DeskRealm v0.5.9" --notes-file ".release-work\release-notes-v0.5.9-from-changelog.md"
 ```
 
 ## Notes

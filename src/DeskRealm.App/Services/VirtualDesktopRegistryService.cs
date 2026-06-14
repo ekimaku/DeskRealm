@@ -16,16 +16,16 @@ internal sealed class VirtualDesktopRegistryService
     public IReadOnlyList<VirtualDesktopInfo> GetVirtualDesktops()
     {
         using var key = Registry.CurrentUser.OpenSubKey(VirtualDesktopsKey, writable: false)
-            ?? throw new InvalidOperationException($"Registry introuvable : HKCU\\{VirtualDesktopsKey}");
+            ?? throw new InvalidOperationException($"Registry not found: HKCU\\{VirtualDesktopsKey}");
 
         if (key.GetValue("VirtualDesktopIDs") is not byte[] ids || ids.Length < 16)
         {
-            throw new InvalidOperationException("VirtualDesktopIDs absent ou vide. Ouvre Win+Tab et crée au moins un bureau virtuel.");
+            throw new InvalidOperationException("VirtualDesktopIDs is missing or empty. Open Win+Tab and create at least one virtual desktop.");
         }
 
         if (ids.Length % 16 != 0)
         {
-            throw new InvalidOperationException($"VirtualDesktopIDs invalide : longueur {ids.Length}, attendue multiple de 16.");
+            throw new InvalidOperationException($"Invalid VirtualDesktopIDs: length {ids.Length}, expected multiple of 16.");
         }
 
         var list = new List<VirtualDesktopInfo>();
@@ -68,7 +68,7 @@ internal sealed class VirtualDesktopRegistryService
                 return current;
             }
 
-            _logger.Warn($"CurrentVirtualDesktop ignoré : {candidate.Id:B} depuis {candidate.Source} n'est pas présent dans VirtualDesktopIDs.");
+            _logger.Warn($"CurrentVirtualDesktop ignored: {candidate.Id:B} from {candidate.Source} is not present in VirtualDesktopIDs.");
         }
 
         var knownIds = string.Join(", ", desktopIds.Select(id => id.ToString("B")));
@@ -77,7 +77,7 @@ internal sealed class VirtualDesktopRegistryService
             : string.Join(", ", candidates.Select(c => $"{c.Id:B} via {c.Source}"));
 
         throw new InvalidOperationException(BuildCurrentDesktopError(
-            $"Aucun CurrentVirtualDesktop valide ne correspond à VirtualDesktopIDs. Candidates: {candidateIds}. Known: {knownIds}"));
+            $"No valid CurrentVirtualDesktop matches VirtualDesktopIDs. Candidates: {candidateIds}. Known: {knownIds}"));
     }
 
     private IReadOnlyList<CurrentDesktopCandidate> GetCurrentVirtualDesktopCandidates()
@@ -110,7 +110,7 @@ internal sealed class VirtualDesktopRegistryService
         }
         else
         {
-            diagnostics.Add($"HKCU\\{SessionInfoKey} introuvable.");
+            diagnostics.Add($"HKCU\\{SessionInfoKey} not found.");
         }
 
         if (candidates.Count == 0)
@@ -127,7 +127,7 @@ internal sealed class VirtualDesktopRegistryService
     private static string BuildCurrentDesktopError(string reason)
     {
         return reason + Environment.NewLine +
-               "DeskRealm ne bascule vers aucun realm par défaut. Ouvre Win+Tab une fois, vérifie qu'au moins deux bureaux virtuels existent, puis relance Refresh now.";
+               "DeskRealm does not switch to any default realm. Open Win+Tab once, verify that at least two virtual desktops exist, then run Refresh now again.";
     }
 
     private void TryAddCandidate(
@@ -140,14 +140,14 @@ internal sealed class VirtualDesktopRegistryService
         using var key = Registry.CurrentUser.OpenSubKey(keyPath, writable: false);
         if (key is null)
         {
-            diagnostics.Add($"HKCU\\{keyPath} introuvable.");
+            diagnostics.Add($"HKCU\\{keyPath} not found.");
             return;
         }
 
         var raw = key.GetValue(valueName);
         if (!TryParseGuidValue(raw, out var id, out var detail))
         {
-            diagnostics.Add($"HKCU\\{keyPath}\\{valueName} invalide : {detail}.");
+            diagnostics.Add($"HKCU\\{keyPath}\\{valueName} invalid: {detail}.");
             return;
         }
 
@@ -161,7 +161,7 @@ internal sealed class VirtualDesktopRegistryService
         switch (raw)
         {
             case null:
-                detail = "valeur absente";
+                detail = "missing value";
                 return false;
 
             case byte[] bytes when bytes.Length == 16:
@@ -170,7 +170,7 @@ internal sealed class VirtualDesktopRegistryService
                 return true;
 
             case byte[] bytes:
-                detail = $"REG_BINARY longueur {bytes.Length}, attendue 16";
+                detail = $"REG_BINARY length {bytes.Length}, expected 16";
                 return false;
 
             case string text when TryParseGuidText(text, out id):
@@ -182,7 +182,7 @@ internal sealed class VirtualDesktopRegistryService
                 return false;
 
             default:
-                detail = $"type {raw.GetType().FullName} non supporté";
+                detail = $"unsupported type {raw.GetType().FullName}";
                 return false;
         }
     }

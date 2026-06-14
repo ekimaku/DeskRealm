@@ -19,6 +19,11 @@ internal sealed class IconLayoutWorkerClientService
         RunWorker("save-if-changed", virtualDesktopId, realmName, timeoutMs);
     }
 
+    public void SaveLockedMergeNewIcons(Guid virtualDesktopId, string realmName, int timeoutMs)
+    {
+        RunWorker("save-locked-merge-new-icons", virtualDesktopId, realmName, timeoutMs);
+    }
+
     public void Restore(Guid virtualDesktopId, string realmName, int timeoutMs)
     {
         RunWorker("restore", virtualDesktopId, realmName, timeoutMs);
@@ -28,7 +33,7 @@ internal sealed class IconLayoutWorkerClientService
     {
         var exePath = Environment.ProcessPath
             ?? Process.GetCurrentProcess().MainModule?.FileName
-            ?? throw new InvalidOperationException("Impossible de déterminer le chemin de DeskRealm.App.exe pour lancer le worker icônes.");
+            ?? throw new InvalidOperationException("Cannot determine DeskRealm.App.exe path to start the icon worker.");
 
         var startInfo = new ProcessStartInfo
         {
@@ -54,7 +59,7 @@ internal sealed class IconLayoutWorkerClientService
 
         if (!process.Start())
         {
-            throw new InvalidOperationException("Impossible de démarrer le worker icônes DeskRealm.");
+            throw new InvalidOperationException("Cannot start the DeskRealm icon worker.");
         }
 
         process.BeginOutputReadLine();
@@ -71,7 +76,7 @@ internal sealed class IconLayoutWorkerClientService
                 _logger.Warn($"Icon layout worker kill failed after timeout: {killEx.Message}");
             }
 
-            throw new TimeoutException($"Worker icônes timeout après {timeoutMs} ms ({operation} {realmName}).");
+            throw new TimeoutException($"Icon worker timeout after {timeoutMs} ms ({operation} {realmName}).");
         }
 
         process.WaitForExit();
@@ -79,7 +84,7 @@ internal sealed class IconLayoutWorkerClientService
         if (process.ExitCode != 0)
         {
             throw new InvalidOperationException(
-                $"Worker icônes échoué avec exit code {process.ExitCode} ({operation} {realmName})." + Environment.NewLine +
+                $"Icon worker failed with exit code {process.ExitCode} ({operation} {realmName})." + Environment.NewLine +
                 $"STDOUT: {stdout}" + Environment.NewLine +
                 $"STDERR: {stderr}");
         }

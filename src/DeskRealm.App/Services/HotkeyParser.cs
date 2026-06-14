@@ -13,13 +13,13 @@ internal static class HotkeyParser
     {
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new InvalidOperationException($"Hotkey vide pour le bureau {desktopNumber}.");
+            throw new InvalidOperationException($"Empty hotkey for desktop {desktopNumber}.");
         }
 
         var parts = text.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (parts.Length < 2)
         {
-            throw new InvalidOperationException($"Hotkey invalide '{text}'. Format attendu, exemple : Win+Shift+W.");
+            throw new InvalidOperationException($"Invalid hotkey '{text}'. Format expected, example: Win+Shift+X.");
         }
 
         uint modifiers = 0;
@@ -53,7 +53,7 @@ internal static class HotkeyParser
 
             if (keyToken is not null)
             {
-                throw new InvalidOperationException($"Hotkey invalide '{text}' : plusieurs touches principales détectées ({keyToken}, {part}).");
+                throw new InvalidOperationException($"Invalid hotkey '{text}': multiple main keys detected ({keyToken}, {part}).");
             }
 
             keyToken = part;
@@ -61,16 +61,90 @@ internal static class HotkeyParser
 
         if (modifiers == 0)
         {
-            throw new InvalidOperationException($"Hotkey invalide '{text}' : aucun modificateur détecté.");
+            throw new InvalidOperationException($"Invalid hotkey '{text}': no modifier detected.");
+        }
+
+        if (CountModifiers(modifiers) > 2)
+        {
+            throw new InvalidOperationException($"Invalid hotkey '{text}': use one or two modifiers only, then one main key.");
         }
 
         if (keyToken is null)
         {
-            throw new InvalidOperationException($"Hotkey invalide '{text}' : touche principale absente.");
+            throw new InvalidOperationException($"Invalid hotkey '{text}': main key missing.");
         }
 
         var virtualKey = ParseVirtualKey(keyToken, text);
-        return new HotkeyBinding(desktopNumber, text.Trim(), modifiers, virtualKey);
+        var normalizedText = FormatHotkeyText(modifiers, virtualKey);
+        return new HotkeyBinding(desktopNumber, normalizedText, modifiers, virtualKey);
+    }
+
+    public static string FormatHotkeyText(uint modifiers, uint virtualKey)
+    {
+        var parts = new List<string>();
+        if ((modifiers & ModWin) != 0)
+        {
+            parts.Add("Win");
+        }
+
+        if ((modifiers & ModControl) != 0)
+        {
+            parts.Add("Ctrl");
+        }
+
+        if ((modifiers & ModAlt) != 0)
+        {
+            parts.Add("Alt");
+        }
+
+        if ((modifiers & ModShift) != 0)
+        {
+            parts.Add("Shift");
+        }
+
+        parts.Add(FormatVirtualKey(virtualKey));
+        return string.Join("+", parts);
+    }
+
+    public static string FormatVirtualKey(uint virtualKey)
+    {
+        if (virtualKey is >= 'A' and <= 'Z')
+        {
+            return ((char)virtualKey).ToString();
+        }
+
+        if (virtualKey is >= '0' and <= '9')
+        {
+            return ((char)virtualKey).ToString();
+        }
+
+        return ((Keys)virtualKey).ToString();
+    }
+
+    public static int CountModifiers(uint modifiers)
+    {
+        var count = 0;
+        if ((modifiers & ModWin) != 0)
+        {
+            count++;
+        }
+
+        if ((modifiers & ModControl) != 0)
+        {
+            count++;
+        }
+
+        if ((modifiers & ModAlt) != 0)
+        {
+            count++;
+        }
+
+        if ((modifiers & ModShift) != 0)
+        {
+            count++;
+        }
+
+        return count;
     }
 
     private static uint ParseVirtualKey(string keyToken, string fullText)
@@ -91,9 +165,19 @@ internal static class HotkeyParser
 
         if (Enum.TryParse<Keys>(keyToken, ignoreCase: true, out var key))
         {
+            if (IsModifierOnlyKey(key))
+            {
+                throw new InvalidOperationException($"Invalid hotkey '{fullText}': main key cannot be a modifier.");
+            }
+
             return (uint)key;
         }
 
-        throw new InvalidOperationException($"Hotkey invalide '{fullText}' : touche principale inconnue '{keyToken}'.");
+        throw new InvalidOperationException($"Invalid hotkey '{fullText}': unknown main key '{keyToken}'.");
+    }
+
+    private static bool IsModifierOnlyKey(Keys key)
+    {
+        return key is Keys.ControlKey or Keys.ShiftKey or Keys.Menu or Keys.LWin or Keys.RWin or Keys.Control or Keys.Shift or Keys.Alt;
     }
 }

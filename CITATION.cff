@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 title: "DeskRealm"
-version: "0.5.8"
+version: "0.5.9"
 message: "If you use or derive from DeskRealm, please cite this project."
 authors:
   - name: "Ayahua"

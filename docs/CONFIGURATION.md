@@ -1,193 +1,185 @@
 # Configuration
 
-DeskRealm stores its user configuration here:
+DeskRealm stores its user configuration locally at:
 
 ```text
 %APPDATA%\DeskRealm\deskrealm.config.json
 ```
 
-Current config version: `6`.
+Current config version: `10`.
 
-## Main settings
+## Core fields
 
-| Setting | Default | Purpose |
-|---|---:|---|
-| `enabled` | `true` | Enables Desktop realm switching. |
-| `pollIntervalMs` | `750` | Main virtual desktop/watch loop interval. Minimum strict value: `250`. |
-| `restoreDesktopOnExit` | `true` | Restores the original Desktop Known Folder path when DeskRealm exits. |
-| `rejectOneDriveDesktop` | `true` | Refuses OneDrive Desktop paths by default. |
-| `syncRealmNamesWithVirtualDesktopNames` | `true` | Uses Windows Task View names as realm folder names. |
-| `initialDesktopImportPromptEnabled` | `true` | Enables the first-run Desktop import wizard for new configs. |
-| `initialDesktopImportPromptCompleted` | `false` for new configs, migrated to `true` for upgrades | Prevents the wizard from interrupting existing users after upgrade. |
-| `initialDesktopImportMoveFiles` | `false` | Legacy compatibility flag. Since v0.5.8, DeskRealm does not move Desktop files during onboarding. |
-| `initialDesktopImportSaveLayout` | `true` | Default wizard option to save current icon positions as the selected realm layout. |
-| `realmNameMaxLength` | `80` | Maximum sanitized realm folder name length. |
-| `startWithWindows` | `false` | Tray-controlled HKCU Run startup setting. |
+| Field | Purpose |
+|---|---|
+| `version` | Config schema version. Current value: `10`. |
+| `enabled` | Enables realm switching automation. When `false`, automatic switching and DeskRealm desktop hotkeys are paused. |
+| `pollIntervalMs` | Watch-loop interval. Strict minimum: `250`. |
+| `restoreDesktopOnExit` | Restores `originalDesktopPath` when DeskRealm exits. |
+| `rejectOneDriveDesktop` | Refuses OneDrive Desktop paths by default. |
+| `syncRealmNamesWithVirtualDesktopNames` | Keeps realm folder names aligned with Windows virtual desktop names. |
+| `originalDesktopPath` | The Desktop path captured when the config was created. |
+| `realmsRoot` | Root folder that contains managed realm folders. |
+| `assignments` | Maps virtual desktop GUIDs to managed realm folders or explicit absolute paths. |
 
-## Icon layout settings
+## First-run onboarding fields
 
-| Setting | Default | Purpose |
-|---|---:|---|
-| `iconLayoutPersistenceEnabled` | `true` | Enables icon layout capture/restore. |
-| `iconLayoutSettleDelayMs` | `500` | Delay before capturing/restoring icon positions after Shell refresh. |
-| `iconLayoutAutoSaveEnabled` | `false` | Compatibility setting. Background icon polling is disabled by default. |
-| `iconLayoutAutoSaveIntervalMs` | `60000` | Legacy/compatibility interval for periodic autosave. Recommended value: keep default. |
-| `iconLayoutWorkerTimeoutMs` | `8000` | Timeout for isolated Shell icon worker operations. |
-| `iconLayoutDisplayTopologyGuardEnabled` | `true` | Refuses saves while display topology is changing/settling. |
-| `iconLayoutDisplayTopologySettleDelayMs` | `1200` | Wait time after monitor/resolution/DPI changes before restoring. |
-| `iconLayoutSwitchRestoreDelayMs` | `1400` | Wait time after virtual desktop/folder switch before restoring icons. |
-| `iconLayoutRestoreRetryCount` | `2` | Number of restore attempts after a switch. Strict range: `1` to `5`. |
-| `iconLayoutRestoreRetryDelayMs` | `450` | Delay between restore retry attempts. |
+| Field | Purpose |
+|---|---|
+| `initialDesktopImportPromptEnabled` | Allows the first-run onboarding UI on fresh configs. |
+| `initialDesktopImportPromptCompleted` | Prevents onboarding from repeating once the user has decided. |
+| `initialDesktopImportMoveFiles` | Legacy safety flag. Since `v0.5.8`, this remains `false`; onboarding does not move Desktop files. |
+| `initialDesktopImportSaveLayout` | Saves the currently visible icon positions when the original Desktop is associated with a realm. |
 
-## First-run Desktop import settings
-
-Since v0.5.8, new configurations can show a first-run wizard before DeskRealm redirects the Desktop to a realm. The wizard can associate the currently visible Windows Desktop folder with a selected virtual desktop realm without moving files.
-
-Relevant settings:
-
-```json
-{
-  "initialDesktopImportPromptEnabled": true,
-  "initialDesktopImportPromptCompleted": false,
-  "initialDesktopImportMoveFiles": false,
-  "initialDesktopImportSaveLayout": true
-}
-```
-
-Upgrade behavior is intentionally conservative: existing configs migrated to version `6` are marked with `initialDesktopImportPromptCompleted: true`, so users who already run DeskRealm are not surprised by an onboarding prompt after an update.
-
-The association operation is strict. It does not move or merge files. It records the selected virtual desktop assignment as the original Desktop path and refuses duplicate original-Desktop assignments.
-
-## Quiet icon persistence model
-
-Since v0.5.1, DeskRealm does not poll icon positions every few seconds by default. Periodic Shell capture can briefly show the Windows busy cursor, so the quiet model is:
-
-```text
-manual save
-save before switching away from a realm
-save before restoring the original Desktop path on exit
-restore after switching into a realm
-```
-
-## Display-topology-aware layouts
-
-Since v0.5.3, layouts are separated by display topology. A topology includes:
-
-```text
-active monitors
-virtual desktop bounds
-monitor bounds / working areas
-primary monitor
-resolution
-orientation
-effective DPI / scale percentage
-```
-
-This prevents layouts from being overwritten when Windows temporarily changes the desktop view, for example:
-
-```text
-main monitor sleeps but secondary monitor stays active
-a game changes resolution
-Windows display scale changes
-monitor orientation changes
-```
-
-When a topology changes, DeskRealm temporarily refuses icon layout saves, waits for the topology to settle, then restores the current realm using the best available variant.
-
-## Fast-switch stabilization
-
-Since v0.5.4, DeskRealm defers icon layout restore after switching Desktop folders. This prevents the following contamination case:
-
-```text
-previous realm icons are still visible
-Windows virtual desktop has already changed
-DeskRealm saves/restores too early
-positions from one realm contaminate another
-```
-
-Recommended defaults:
-
-```json
-{
-  "iconLayoutSwitchRestoreDelayMs": 1400,
-  "iconLayoutRestoreRetryCount": 2,
-  "iconLayoutRestoreRetryDelayMs": 450
-}
-```
-
-## Repeated icon identity fallback
-
-Since v0.5.6, saved icon entries include additional Shell identity metadata:
-
-```json
-{
-  "itemKey": "pidl-sha256:...",
-  "displayName": "Opera Browser",
-  "shellDisplayName": "Opera Browser",
-  "shellParsingName": "...",
-  "identityKeys": [
-    "pidl-sha256:...",
-    "shell-display:opera browser",
-    "shell-parsing:..."
-  ]
-}
-```
-
-Restore order:
-
-1. exact PIDL-derived key match;
-2. Shell display/parsing/name fallback match;
-3. warning log if the saved icon still cannot be found in the current Desktop view.
-
-After upgrading from older versions, use **Save icon layout now** once per important realm to refresh layouts with the new identity metadata.
+On fresh `v0.5.9` configs, DeskRealm opens the main UI before the first automatic Desktop switch. The user can associate the original Desktop path with one realm or skip association and create shortcuts back to the original Desktop.
 
 ## Hotkeys
 
-Default hotkeys:
-
 ```json
+"desktopHotkeysEnabled": true,
 "desktopHotkeys": {
-  "1": "Win+Shift+W",
-  "2": "Win+Shift+X",
-  "3": "Win+Shift+C",
-  "4": "Win+Shift+V",
-  "5": "Win+Shift+B",
-  "6": "Win+Shift+N"
+  "1": "Win+Shift+X",
+  "2": "Win+Shift+C",
+  "3": "Win+Shift+B",
+  "4": "Win+Shift+N"
 }
 ```
 
-Supported modifier tokens:
+The `v0.5.9` defaults intentionally avoid `Win+Shift+W` and `Win+Shift+V`. Existing customized hotkeys are preserved during migration; only untouched legacy defaults are replaced.
+
+The UI hotkey editor is capture-based:
+
+1. click a hotkey field;
+2. hold one or two modifier keys: `Win`, `Ctrl`, `Alt`, `Shift`;
+3. press one main key;
+4. click **Save + reload** to persist and re-register the global hotkeys.
+
+Capture stops as soon as the first non-modifier key is pressed. If the user releases all modifiers before pressing a main key, capture is cancelled and the previous value is restored.
+
+Hotkeys must contain one or two modifiers plus one main key. Duplicate shortcuts are rejected explicitly after normalization.
+
+## Realm switching automation pause
+
+`enabled=false` means DeskRealm realm switching automation is paused.
+
+While paused:
+
+- the watch loop does not change the Desktop Known Folder;
+- DeskRealm desktop hotkeys are ignored;
+- manual refresh/switch actions refuse to change realms and show an explicit paused message;
+- assignments, realm folders, layouts, files and icons remain untouched.
+
+## Icon layout persistence
+
+| Field | Purpose |
+|---|---|
+| `iconLayoutPersistenceEnabled` | Enables save/restore of Desktop icon positions. |
+| `iconLayoutSettleDelayMs` | Delay before layout capture/restore actions. |
+| `iconLayoutAutoSaveEnabled` | Background autosave toggle. Default remains `false`. |
+| `iconLayoutAutoSaveIntervalMs` | Interval used when autosave is enabled. |
+| `iconLayoutWorkerTimeoutMs` | Timeout for the isolated icon-layout worker. |
+| `iconLayoutDisplayTopologyGuardEnabled` | Prevents saves while monitor/resolution/DPI topology is changing. |
+| `iconLayoutDisplayTopologySettleDelayMs` | Delay used while display topology settles. |
+| `iconLayoutSwitchRestoreDelayMs` | Delay after realm switch before restore. |
+| `iconLayoutRestoreRetryCount` | Number of restore retries. |
+| `iconLayoutRestoreRetryDelayMs` | Delay between restore retries. |
+
+Icon layout files are stored at:
 
 ```text
-Win
-Ctrl
-Shift
-Alt
+%APPDATA%\DeskRealm\icon-layouts\<virtual-desktop-guid>.json
 ```
 
-Examples:
+Each layout file can contain multiple `variants`, one per display topology. The **Icon Layout** UI reads those variants and shows them as child rows. Variant rows display per-monitor working areas from persisted `DisplayX.workingWidth` / `DisplayX.workingHeight` metadata and mark the primary display with `✅`.
 
-```text
-Win+Shift+W
-Ctrl+Alt+1
-Win+Alt+F1
+## Locks
+
+### `lockedIconLayouts`
+
+Desktop-wide layout locks keyed by virtual desktop GUID:
+
+```json
+"lockedIconLayouts": {
+  "{00000000-0000-0000-0000-000000000000}": true
+}
 ```
 
-DeskRealm does not silently replace rejected shortcuts. If a combination is already used by Windows or another app, the failure is logged and that binding is skipped.
+### `lockedRealms`
 
-## Assignments
+Realm-wide locks keyed by normalized realm path:
 
-`assignments` maps virtual desktop GUIDs to realm folder names.
+```json
+"lockedRealms": {
+  "C:\\USERS\\YOU\\DESKTOP\\DESKREALM\\PERSONAL": true
+}
+```
 
-When name sync is enabled, DeskRealm updates these mappings from the virtual desktop names shown in Windows Task View.
+A realm lock protects every layout variant assigned to that realm. Child rows are disabled in the UI while the parent realm is locked.
 
-## Conflict policy
+### `lockedIconLayoutVariants`
 
-DeskRealm is strict:
+Variant locks keyed by virtual desktop GUID plus display-topology key:
 
-- source folder exists, target does not: rename source to target;
-- source missing, target exists: adopt target and update config;
-- source and target both exist: stop with explicit conflict;
-- duplicate virtual desktop names: stop with explicit conflict;
-- invalid current virtual desktop GUID: stop with explicit error;
-- known Desktop path and current Windows virtual desktop mismatch: skip/refuse icon layout save.
+```json
+"lockedIconLayoutVariants": {
+  "{00000000-0000-0000-0000-000000000000}|display-topology-key": true
+}
+```
+
+When the current layout/realm/variant is locked, automatic saves use merge-only-new-icons behavior. Existing protected positions are not overwritten; newly detected icons can be appended once.
+
+A full overwrite of a locked layout is possible only after explicit confirmation from the UI or tray manual save path.
+
+## Variant deletion
+
+The **Icon Layout** tab can delete a saved display-topology variant after confirmation. This removes only the selected variant entry from `%APPDATA%\DeskRealm\icon-layouts\<desktop-guid>.json`; it does not delete Desktop files or icons.
+
+If the deleted variant is present in `lockedIconLayoutVariants`, the lock entry is removed at the same time. If the last variant is deleted, the now-empty layout JSON file is removed. Config schema remains `10`.
+
+## Example
+
+```json
+{
+  "version": 10,
+  "enabled": true,
+  "pollIntervalMs": 750,
+  "restoreDesktopOnExit": true,
+  "rejectOneDriveDesktop": true,
+  "syncRealmNamesWithVirtualDesktopNames": true,
+  "initialDesktopImportPromptEnabled": true,
+  "initialDesktopImportPromptCompleted": false,
+  "initialDesktopImportMoveFiles": false,
+  "initialDesktopImportSaveLayout": true,
+  "realmNameMaxLength": 80,
+  "iconLayoutPersistenceEnabled": true,
+  "iconLayoutSettleDelayMs": 500,
+  "iconLayoutAutoSaveEnabled": false,
+  "iconLayoutAutoSaveIntervalMs": 60000,
+  "iconLayoutWorkerTimeoutMs": 8000,
+  "iconLayoutDisplayTopologyGuardEnabled": true,
+  "iconLayoutDisplayTopologySettleDelayMs": 1200,
+  "iconLayoutSwitchRestoreDelayMs": 1400,
+  "iconLayoutRestoreRetryCount": 2,
+  "iconLayoutRestoreRetryDelayMs": 450,
+  "desktopHotkeysEnabled": true,
+  "desktopHotkeys": {
+    "1": "Win+Shift+X",
+    "2": "Win+Shift+C",
+    "3": "Win+Shift+B",
+    "4": "Win+Shift+N"
+  },
+  "lockedIconLayouts": {},
+  "lockedRealms": {},
+  "lockedIconLayoutVariants": {},
+  "hotkeyInitialDelayMs": 180,
+  "hotkeySwitchStepDelayMs": 160,
+  "hotkeySwitchSettleTimeoutMs": 3000,
+  "startWithWindows": false,
+  "originalDesktopPath": "C:\\Users\\<you>\\Desktop",
+  "realmsRoot": "C:\\Users\\<you>\\Desktop\\DeskRealm",
+  "nextRealmNumber": 1,
+  "assignments": {
+    "{00000000-0000-0000-0000-000000000000}": "Personal"
+  }
+}
+```

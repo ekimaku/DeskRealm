@@ -5,7 +5,7 @@ namespace DeskRealm.App.Services;
 internal sealed class RealmConfig
 {
     [JsonPropertyName("version")]
-    public int Version { get; set; } = 6;
+    public int Version { get; set; } = 10;
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
@@ -73,15 +73,27 @@ internal sealed class RealmConfig
     public bool DesktopHotkeysEnabled { get; set; } = true;
 
     [JsonPropertyName("desktopHotkeys")]
-    public Dictionary<string, string> DesktopHotkeys { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+    public Dictionary<string, string> DesktopHotkeys { get; set; } = CreateDefaultDesktopHotkeys();
+
+    [JsonPropertyName("lockedIconLayouts")]
+    public Dictionary<string, bool> LockedIconLayouts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    [JsonPropertyName("lockedRealms")]
+    public Dictionary<string, bool> LockedRealms { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    [JsonPropertyName("lockedIconLayoutVariants")]
+    public Dictionary<string, bool> LockedIconLayoutVariants { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public static Dictionary<string, string> CreateDefaultDesktopHotkeys()
     {
-        ["1"] = "Win+Shift+W",
-        ["2"] = "Win+Shift+X",
-        ["3"] = "Win+Shift+C",
-        ["4"] = "Win+Shift+V",
-        ["5"] = "Win+Shift+B",
-        ["6"] = "Win+Shift+N"
-    };
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["1"] = "Win+Shift+X",
+            ["2"] = "Win+Shift+C",
+            ["3"] = "Win+Shift+B",
+            ["4"] = "Win+Shift+N"
+        };
+    }
 
     [JsonPropertyName("hotkeyInitialDelayMs")]
     public int HotkeyInitialDelayMs { get; set; } = 180;

@@ -36,7 +36,7 @@ internal sealed class GlobalHotkeyService : IDisposable
         {
             if (!int.TryParse(pair.Key, out var desktopNumber))
             {
-                errors.Add($"desktopHotkeys key invalide : {pair.Key}");
+                errors.Add($"Invalid desktopHotkeys key: {pair.Key}");
                 continue;
             }
 
@@ -55,7 +55,7 @@ internal sealed class GlobalHotkeyService : IDisposable
             if (!RegisterHotKey(_window.Handle, id, binding.Modifiers, binding.VirtualKey))
             {
                 var error = Marshal.GetLastWin32Error();
-                errors.Add($"Hotkey refusé par Windows : {binding.Text} -> bureau #{desktopNumber}. Win32Error={error}.");
+                errors.Add($"Hotkey rejected by Windows: {binding.Text} -> desktop #{desktopNumber}. Win32Error={error}.");
                 continue;
             }
 
@@ -65,7 +65,7 @@ internal sealed class GlobalHotkeyService : IDisposable
 
         if (_registered.Count == 0 && config.DesktopHotkeysEnabled)
         {
-            errors.Add("Aucun hotkey DeskRealm n'a été enregistré.");
+            errors.Add("No DeskRealm hotkey was registered.");
         }
 
         foreach (var error in errors)
@@ -99,7 +99,7 @@ internal sealed class GlobalHotkeyService : IDisposable
     {
         if (!_registered.TryGetValue(id, out var binding))
         {
-            _logger.Warn($"WM_HOTKEY reçu pour un id inconnu : {id}");
+            _logger.Warn($"WM_HOTKEY received for an unknown id: {id}");
             return;
         }
 

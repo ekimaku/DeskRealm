@@ -28,7 +28,7 @@ internal static class DisplayTopologyService
 
         if (screens.Count == 0)
         {
-            throw new InvalidOperationException("Topologie affichage introuvable : Windows ne retourne aucun écran actif.");
+            throw new InvalidOperationException("Display topology unavailable: Windows did not return any active screen.");
         }
 
         var minX = screens.Min(s => s.BoundsX);

@@ -33,6 +33,11 @@ internal sealed class IconLayoutPersistenceService
         SaveInternal(virtualDesktopId, realmName, saveOnlyIfChanged: true);
     }
 
+    public void SaveLockedMergeNewIcons(Guid virtualDesktopId, string realmName)
+    {
+        SaveLockedMergeNewIconsInternal(virtualDesktopId, realmName);
+    }
+
     public void Restore(Guid virtualDesktopId, string realmName)
     {
         var path = GetLayoutPath(virtualDesktopId);
@@ -45,7 +50,7 @@ internal sealed class IconLayoutPersistenceService
         var currentTopology = DisplayTopologyService.Capture();
         var raw = File.ReadAllText(path);
         var layout = JsonSerializer.Deserialize<DesktopIconLayout>(raw, _jsonOptions)
-            ?? throw new InvalidOperationException($"Layout icônes illisible : désérialisation vide ({path}).");
+            ?? throw new InvalidOperationException($"Unreadable icon layout: empty deserialization ({path}).");
 
         ValidateLayoutOwner(layout, virtualDesktopId, path);
 
@@ -66,10 +71,161 @@ internal sealed class IconLayoutPersistenceService
             $"(variant={selected.MatchKind}, topology={currentTopology.Key}, path={path})");
     }
 
+    public bool DeleteVariant(Guid virtualDesktopId, string displayTopologyKey)
+    {
+        if (string.IsNullOrWhiteSpace(displayTopologyKey) ||
+            string.Equals(displayTopologyKey, "pending-baseline", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Cannot delete an icon layout variant without a persisted display topology key.");
+        }
+
+        var path = GetLayoutPath(virtualDesktopId);
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException($"Icon layout file not found: {path}", path);
+        }
+
+        var raw = File.ReadAllText(path);
+        var layout = JsonSerializer.Deserialize<DesktopIconLayout>(raw, _jsonOptions)
+            ?? throw new InvalidOperationException($"Unreadable icon layout: empty deserialization ({path}).");
+
+        ValidateLayoutOwner(layout, virtualDesktopId, path);
+
+        if (layout.Variants.Count == 0 && layout.Icons.Count > 0)
+        {
+            layout.Variants.Add(new DesktopIconLayoutVariant
+            {
+                DisplayTopologyKey = string.IsNullOrWhiteSpace(layout.DisplayTopologyKey) ? "legacy:no-topology" : layout.DisplayTopologyKey,
+                DisplayTopologyFamilyKey = string.IsNullOrWhiteSpace(layout.DisplayTopologyFamilyKey) ? "legacy:no-family" : layout.DisplayTopologyFamilyKey,
+                DisplayTopology = layout.DisplayTopology,
+                SavedAt = layout.SavedAt,
+                Icons = layout.Icons
+            });
+        }
+
+        var before = layout.Variants.Count;
+        layout.Variants = layout.Variants
+            .Where(v => !string.Equals(v.DisplayTopologyKey, displayTopologyKey, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(v => v.SavedAt)
+            .ToList();
+
+        if (layout.Variants.Count == before)
+        {
+            throw new InvalidOperationException($"Icon layout variant not found for topology key: {displayTopologyKey}");
+        }
+
+        if (layout.Variants.Count == 0)
+        {
+            File.Delete(path);
+            _logger.Info($"Icon layout variant deleted and empty layout file removed: {virtualDesktopId:B} (topology={displayTopologyKey}, path={path})");
+            return true;
+        }
+
+        var latest = layout.Variants.OrderByDescending(v => v.SavedAt).First();
+        layout.Version = 3;
+        layout.SavedAt = latest.SavedAt;
+        layout.DisplayTopologyKey = latest.DisplayTopologyKey;
+        layout.DisplayTopologyFamilyKey = latest.DisplayTopologyFamilyKey;
+        layout.DisplayTopology = latest.DisplayTopology;
+        layout.Icons = latest.Icons;
+
+        File.WriteAllText(path, JsonSerializer.Serialize(layout, _jsonOptions));
+        _logger.Info($"Icon layout variant deleted: {virtualDesktopId:B} (topology={displayTopologyKey}, remaining={layout.Variants.Count}, path={path})");
+        return true;
+    }
+
     public string GetLayoutPath(Guid virtualDesktopId)
+    {
+        return GetLayoutPathForDesktop(virtualDesktopId);
+    }
+
+    public static string GetLayoutPathForDesktop(Guid virtualDesktopId)
     {
         var safeGuid = virtualDesktopId.ToString("N");
         return Path.Combine(LayoutRoot, safeGuid + ".json");
+    }
+
+
+    public static IReadOnlyList<IconLayoutVariantFileSnapshot> ReadLayoutVariantsForDesktop(Guid virtualDesktopId)
+    {
+        var path = GetLayoutPathForDesktop(virtualDesktopId);
+        if (!File.Exists(path))
+        {
+            return [];
+        }
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+
+        var raw = File.ReadAllText(path);
+        var layout = JsonSerializer.Deserialize<DesktopIconLayout>(raw, options)
+            ?? throw new InvalidOperationException($"Unreadable icon layout: empty deserialization ({path}).");
+
+        ValidateLayoutOwner(layout, virtualDesktopId, path);
+
+        if (layout.Variants.Count == 0 && layout.Icons.Count > 0)
+        {
+            layout.Variants.Add(new DesktopIconLayoutVariant
+            {
+                DisplayTopologyKey = string.IsNullOrWhiteSpace(layout.DisplayTopologyKey) ? "legacy:no-topology" : layout.DisplayTopologyKey,
+                DisplayTopologyFamilyKey = string.IsNullOrWhiteSpace(layout.DisplayTopologyFamilyKey) ? "legacy:no-family" : layout.DisplayTopologyFamilyKey,
+                DisplayTopology = layout.DisplayTopology,
+                SavedAt = layout.SavedAt,
+                Icons = layout.Icons
+            });
+        }
+
+        return layout.Variants
+            .Where(v => !string.IsNullOrWhiteSpace(v.DisplayTopologyKey))
+            .OrderByDescending(v => v.SavedAt)
+            .Select((variant, index) => new IconLayoutVariantFileSnapshot(
+                variant.DisplayTopologyKey,
+                string.IsNullOrWhiteSpace(variant.DisplayTopologyFamilyKey) ? "unknown-family" : variant.DisplayTopologyFamilyKey,
+                variant.SavedAt,
+                variant.Icons.Count,
+                BuildVariantSummary(variant, index + 1),
+                BuildVariantDisplays(variant.DisplayTopology)))
+            .ToList();
+    }
+
+    private static string BuildVariantSummary(DesktopIconLayoutVariant variant, int index)
+    {
+        if (variant.DisplayTopology is null)
+        {
+            return $"Variant {index} · {ShortTopologyKey(variant.DisplayTopologyKey)}";
+        }
+
+        return $"Variant {index}";
+    }
+
+    private static IReadOnlyList<IconLayoutDisplayFileSnapshot> BuildVariantDisplays(DisplayTopologySnapshot? topology)
+    {
+        if (topology is null)
+        {
+            return [];
+        }
+
+        return topology.Screens
+            .Select((screen, index) => new IconLayoutDisplayFileSnapshot(
+                string.IsNullOrWhiteSpace(screen.DeviceName) ? $"Display {index + 1}" : screen.DeviceName,
+                screen.Primary,
+                screen.WorkingWidth,
+                screen.WorkingHeight,
+                screen.ScalePercent,
+                string.IsNullOrWhiteSpace(screen.Orientation) ? "unknown" : screen.Orientation))
+            .ToList();
+    }
+
+    private static string ShortTopologyKey(string topologyKey)
+    {
+        if (string.IsNullOrWhiteSpace(topologyKey))
+        {
+            return "unknown topology";
+        }
+
+        return topologyKey.Length <= 18 ? topologyKey : topologyKey[..18] + "…";
     }
 
     private void SaveInternal(Guid virtualDesktopId, string realmName, bool saveOnlyIfChanged)
@@ -125,6 +281,78 @@ internal sealed class IconLayoutPersistenceService
         _logger.Info($"Icon layout {mode}: {realmName} {virtualDesktopId:B} -> {icons.Count} icons (topology={topology.Key}, variants={layout.Variants.Count}, path={path})");
     }
 
+    private void SaveLockedMergeNewIconsInternal(Guid virtualDesktopId, string realmName)
+    {
+        Directory.CreateDirectory(LayoutRoot);
+
+        var topology = DisplayTopologyService.Capture();
+        var capturedIcons = EnrichIconsWithDisplayTopology(_desktopIcons.CapturePositions(), topology).ToList();
+        var path = GetLayoutPath(virtualDesktopId);
+        var now = DateTimeOffset.Now;
+
+        var layout = LoadExistingLayout(path, virtualDesktopId, realmName);
+        ValidateLayoutOwner(layout, virtualDesktopId, path);
+
+        var existingVariant = layout.Variants.FirstOrDefault(v =>
+            string.Equals(v.DisplayTopologyKey, topology.Key, StringComparison.OrdinalIgnoreCase));
+
+        if (existingVariant is null || existingVariant.Icons.Count == 0)
+        {
+            SaveInternal(virtualDesktopId, realmName, saveOnlyIfChanged: false);
+            _logger.Info($"Icon layout locked baseline saved: {realmName} {virtualDesktopId:B} -> {capturedIcons.Count} icons (topology={topology.Key}, path={path})");
+            return;
+        }
+
+        var existingIdentityKeys = BuildIconIdentitySet(existingVariant.Icons);
+        var newIcons = capturedIcons
+            .Where(icon => !IconMatchesExisting(icon, existingIdentityKeys))
+            .ToList();
+
+        if (newIcons.Count == 0)
+        {
+            _logger.Info($"Icon layout locked autosave skipped: no new icons detected for {realmName} {virtualDesktopId:B} under topology {topology.Key}.");
+            return;
+        }
+
+        var mergedIcons = existingVariant.Icons
+            .Concat(newIcons)
+            .OrderBy(i => i.Y)
+            .ThenBy(i => i.X)
+            .ThenBy(i => i.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var replacement = new DesktopIconLayoutVariant
+        {
+            DisplayTopologyKey = topology.Key,
+            DisplayTopologyFamilyKey = topology.FamilyKey,
+            DisplayTopology = topology,
+            SavedAt = now,
+            Icons = mergedIcons
+        };
+
+        layout.Version = 3;
+        layout.VirtualDesktopId = virtualDesktopId.ToString("B");
+        layout.RealmName = realmName;
+        layout.SavedAt = now;
+        layout.DisplayTopologyKey = topology.Key;
+        layout.DisplayTopologyFamilyKey = topology.FamilyKey;
+        layout.DisplayTopology = topology;
+        layout.Icons = mergedIcons;
+        layout.Variants = layout.Variants
+            .Where(v => !string.Equals(v.DisplayTopologyKey, topology.Key, StringComparison.OrdinalIgnoreCase))
+            .Append(replacement)
+            .OrderByDescending(v => v.SavedAt)
+            .Take(24)
+            .ToList();
+
+        var raw = JsonSerializer.Serialize(layout, _jsonOptions);
+        File.WriteAllText(path, raw);
+
+        _logger.Info(
+            $"Icon layout locked autosave merged new icons: {realmName} {virtualDesktopId:B} -> " +
+            $"new={newIcons.Count}, total={mergedIcons.Count}, topology={topology.Key}, variants={layout.Variants.Count}, path={path}");
+    }
+
     private DesktopIconLayout LoadExistingLayout(string path, Guid virtualDesktopId, string realmName)
     {
         if (!File.Exists(path))
@@ -139,7 +367,7 @@ internal sealed class IconLayoutPersistenceService
 
         var raw = File.ReadAllText(path);
         var layout = JsonSerializer.Deserialize<DesktopIconLayout>(raw, _jsonOptions)
-            ?? throw new InvalidOperationException($"Layout icônes illisible : désérialisation vide ({path}).");
+            ?? throw new InvalidOperationException($"Unreadable icon layout: empty deserialization ({path}).");
 
         if (layout.Variants.Count == 0 && layout.Icons.Count > 0)
         {
@@ -161,7 +389,7 @@ internal sealed class IconLayoutPersistenceService
         if (!string.Equals(layout.VirtualDesktopId, virtualDesktopId.ToString("B"), StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                $"Layout icônes invalide : le fichier {path} déclare {layout.VirtualDesktopId}, attendu {virtualDesktopId:B}.");
+                $"Invalid icon layout: file {path} declares {layout.VirtualDesktopId}, expected {virtualDesktopId:B}.");
         }
     }
 
@@ -307,6 +535,53 @@ internal sealed class IconLayoutPersistenceService
         return (long)dx * dx + (long)dy * dy;
     }
 
+    private static HashSet<string> BuildIconIdentitySet(IEnumerable<DesktopIconPosition> icons)
+    {
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var icon in icons)
+        {
+            foreach (var key in EnumerateIconIdentityKeys(icon))
+            {
+                keys.Add(key);
+            }
+        }
+
+        return keys;
+    }
+
+    private static bool IconMatchesExisting(DesktopIconPosition icon, HashSet<string> existingIdentityKeys)
+    {
+        return EnumerateIconIdentityKeys(icon).Any(existingIdentityKeys.Contains);
+    }
+
+    private static IEnumerable<string> EnumerateIconIdentityKeys(DesktopIconPosition icon)
+    {
+        if (!string.IsNullOrWhiteSpace(icon.ItemKey))
+        {
+            yield return "item:" + icon.ItemKey.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(icon.ShellParsingName))
+        {
+            yield return "parsing:" + icon.ShellParsingName.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(icon.ShellDisplayName))
+        {
+            yield return "shell-display:" + icon.ShellDisplayName.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(icon.DisplayName))
+        {
+            yield return "display:" + icon.DisplayName.Trim();
+        }
+
+        foreach (var identity in icon.IdentityKeys.Where(k => !string.IsNullOrWhiteSpace(k)))
+        {
+            yield return "identity:" + identity.Trim();
+        }
+    }
+
     private static string LayoutFingerprint(IEnumerable<DesktopIconPosition> icons)
     {
         var builder = new StringBuilder();
@@ -323,3 +598,19 @@ internal sealed class IconLayoutPersistenceService
 
     private readonly record struct SelectedIconVariant(string MatchKind, List<DesktopIconPosition> Icons, DisplayTopologySnapshot? SourceTopology);
 }
+
+internal sealed record IconLayoutVariantFileSnapshot(
+    string DisplayTopologyKey,
+    string DisplayTopologyFamilyKey,
+    DateTimeOffset SavedAt,
+    int IconCount,
+    string Summary,
+    IReadOnlyList<IconLayoutDisplayFileSnapshot> Displays);
+
+internal sealed record IconLayoutDisplayFileSnapshot(
+    string DeviceName,
+    bool Primary,
+    int WorkingWidth,
+    int WorkingHeight,
+    int ScalePercent,
+    string Orientation);

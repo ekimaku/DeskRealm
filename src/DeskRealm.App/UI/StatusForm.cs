@@ -17,7 +17,7 @@ internal sealed class StatusForm : Form
     public StatusForm(DesktopSwitchService switchService)
     {
         _switchService = switchService;
-        Text = "DeskRealm — statut";
+        Text = "DeskRealm — status";
         Width = 820;
         Height = 520;
         Controls.Add(_textBox);
