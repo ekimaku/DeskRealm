@@ -1,66 +1,55 @@
-# Release process
+# DeskRealm release process
 
-DeskRealm uses GitHub Actions to build Windows artifacts.
+## Development milestone rule
 
-## CI build
+During an unpublished milestone, the application/version metadata stays on the target release number (currently `0.6.0`). Local source archives use alphabetical suffixes only in the ZIP filename to preserve chronological order. Do not create intermediate Git tags or increment the application version for candidate fixes.
 
-Every push to `main` builds the app and uploads workflow artifacts.
+Example local archive sequence:
 
-A pushed tag matching `v*` creates a GitHub Release and attaches the release assets.
-
-## Public release
-
-Recommended local helper command:
-
-```powershell
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.9 -DryRun
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.9
+```text
+DeskRealm_v0_6_0_aa.zip
+DeskRealm_v0_6_0_ab.zip
+DeskRealm_v0_6_0_ac.zip
 ```
 
-Manual release flow:
+The final approved repository state is released once as Git tag `v0.6.0`.
+
+## Pre-release validation
 
 ```powershell
-git add -A
-git commit -m "Release DeskRealm v0.5.9"
+.\scripts\Run-DeskRealm.ps1
+.\scripts\Build-Release.ps1
+```
+
+Complete `SMOKE_TEST.md` and verify `VERSION.txt`, the project version, CHANGELOG and release notes all agree.
+
+## Release helper
+
+Dry run first:
+
+```powershell
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.6.0 -DryRun
+```
+
+Publish only after the milestone is approved:
+
+```powershell
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.6.0
+```
+
+Equivalent manual flow:
+
+```powershell
+git add .
+git commit -m "Release DeskRealm v0.6.0"
 git push origin main
-git tag -a v0.5.9 -m "DeskRealm v0.5.9"
-git push origin v0.5.9
+git tag -a v0.6.0 -m "DeskRealm v0.6.0"
+git push origin v0.6.0
 ```
 
-The `Build and release` workflow will:
+Expected release assets:
 
-1. restore and build the .NET solution;
-2. publish a self-contained Windows x64 app;
-3. create a portable ZIP;
-4. create an install-bundle ZIP;
-5. attach both ZIP files to the GitHub Release for that tag.
+- `DeskRealm-0.6.0-win-x64-portable.zip`
+- `DeskRealm-0.6.0-win-x64-install-bundle.zip`
 
-## Release artifacts
-
-- `DeskRealm-<version>-win-x64-portable.zip` — simplest user download.
-- `DeskRealm-<version>-win-x64-install-bundle.zip` — includes `Install-DeskRealm.ps1` and `Uninstall-DeskRealm.ps1`.
-
-## Release notes source
-
-`CHANGELOG.md` is the source of truth for release notes. The local helper extracts the requested version section and updates the GitHub Release body after the tag-triggered workflow creates the release.
-
-Manual update after the workflow succeeds:
-
-```powershell
-gh release edit v0.5.9 --repo ekimaku/DeskRealm --title "DeskRealm v0.5.9" --notes-file ".release-work\release-notes-v0.5.9-from-changelog.md"
-```
-
-## Notes
-
-DeskRealm does not currently ship a signed MSI/EXE installer. The install bundle is intentionally transparent PowerShell so users can inspect what it does before running it. A signed MSI may be added later if the project grows.
-
-## Troubleshooting releases
-
-Watch recent runs:
-
-```powershell
-gh run list --repo ekimaku/DeskRealm --limit 5
-gh run watch --repo ekimaku/DeskRealm --compact --exit-status
-```
-
-If a release was created manually or notes need to be refreshed, use `gh release edit --notes-file` rather than recreating the tag.
+GitHub release notes are sourced from `docs/release-notes/v0.6.0.md` and the release-helper-compatible `## v0.6.0` section in `CHANGELOG.md`.

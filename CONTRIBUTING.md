@@ -20,7 +20,7 @@ DeskRealm touches sensitive Windows Shell behavior, so contributions should stay
 Requirements:
 
 - Windows 10/11
-- .NET 8 SDK
+- .NET 10 SDK
 
 Build:
 

@@ -37,7 +37,9 @@ internal sealed class StatusForm : Form
             $"Last message         : {status.LastMessage}{Environment.NewLine}" +
             $"Sync names           : {_switchService.Config.SyncRealmNamesWithVirtualDesktopNames}{Environment.NewLine}" +
             $"Icon layout persist  : {_switchService.Config.IconLayoutPersistenceEnabled}{Environment.NewLine}" +
-            $"Icon settle delay    : {_switchService.Config.IconLayoutSettleDelayMs} ms{Environment.NewLine}" +
+            $"Shell ready timeout : {_switchService.Config.ShellViewReadyTimeoutMs} ms{Environment.NewLine}" +
+            $"Icon verify timeout : {_switchService.Config.IconLayoutRestoreVerificationTimeoutMs} ms{Environment.NewLine}" +
+            $"Icon runtime status : {_switchService.IconLayoutRuntimeStatus}{Environment.NewLine}" +
             $"Desktop hotkeys     : {_switchService.Config.DesktopHotkeysEnabled}{Environment.NewLine}" +
             $"Hotkey bindings     : {string.Join(", ", _switchService.Config.DesktopHotkeys.OrderBy(p => p.Key).Select(p => $"#{p.Key}={p.Value}"))}{Environment.NewLine}" +
             $"Start with Windows  : {_switchService.Config.StartWithWindows}{Environment.NewLine}" +

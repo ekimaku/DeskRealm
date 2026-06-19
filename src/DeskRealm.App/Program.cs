@@ -1,5 +1,6 @@
 using DeskRealm.App.Services;
 using DeskRealm.App.UI;
+using System.Text.Json;
 
 namespace DeskRealm.App;
 
@@ -8,11 +9,13 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        if (args.Length > 0 && string.Equals(args[0], "--icon-layout-worker", StringComparison.OrdinalIgnoreCase))
+        if (args.Length > 0 && string.Equals(args[0], "--icon-layout-worker-server", StringComparison.OrdinalIgnoreCase))
         {
-            RunIconLayoutWorker(args);
+            RunIconLayoutWorkerServer();
             return;
         }
+
+
 
         ApplicationConfiguration.Initialize();
 
@@ -56,12 +59,20 @@ internal static class Program
             var shellRefresh = new ShellRefreshService(logger);
             var iconLayouts = new IconLayoutWorkerClientService(logger);
             var keyboard = new KeyboardInputService(logger);
-            var navigator = new VirtualDesktopNavigatorService(keyboard, logger);
-            var switchService = new DesktopSwitchService(configService, knownFolder, virtualDesktop, shellRefresh, iconLayouts, navigator, logger);
+            var navigator = new VirtualDesktopNavigatorService(keyboard, virtualDesktop, logger);
+            var switchService = new DesktopSwitchService(configService, knownFolder, virtualDesktop, shellRefresh, iconLayouts, navigator, keyboard, logger);
             var hotkeys = new GlobalHotkeyService(logger);
             var startup = new StartupService(logger);
+            var desktopChanges = new VirtualDesktopChangeMonitor(logger);
 
-            Application.Run(new TrayAppContext(switchService, configService, hotkeys, startup, logger));
+            Application.Run(new TrayAppContext(
+                switchService,
+                configService,
+                hotkeys,
+                startup,
+                desktopChanges,
+                iconLayouts,
+                logger));
         }
         catch (Exception ex)
         {
@@ -74,64 +85,121 @@ internal static class Program
         }
     }
 
-    private static void RunIconLayoutWorker(string[] args)
+    private static void RunIconLayoutWorkerServer()
     {
+        Console.InputEncoding = IconWorkerProtocol.Utf8NoBom;
+        Console.OutputEncoding = IconWorkerProtocol.Utf8NoBom;
+
         var logger = new FileLogger(AppPaths.LogFilePath);
+        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 
         try
         {
-            if (args.Length != 4)
-            {
-                throw new InvalidOperationException("Usage worker invalide : --icon-layout-worker <save|save-if-changed|save-locked-merge-new-icons|restore> <virtualDesktopGuid> <realmName>");
-            }
-
-            var operation = args[1];
-            var virtualDesktopId = Guid.Parse(args[2]);
-            var realmName = args[3];
-
-            logger.Info($"Icon layout worker starting: {operation} {realmName} {virtualDesktopId:B}");
-
             var desktopIcons = new DesktopIconShellService(logger);
-            var iconLayouts = new IconLayoutPersistenceService(desktopIcons, logger);
+            var knownFolder = new KnownFolderService(logger);
+            var iconLayouts = new IconLayoutPersistenceService(desktopIcons, knownFolder, logger);
+            logger.Info("Persistent icon worker server ready.");
 
-            if (string.Equals(operation, "save", StringComparison.OrdinalIgnoreCase))
+            string? line;
+            while ((line = Console.ReadLine()) is not null)
             {
-                iconLayouts.Save(virtualDesktopId, realmName);
-            }
-            else if (string.Equals(operation, "save-if-changed", StringComparison.OrdinalIgnoreCase))
-            {
-                iconLayouts.SaveIfChanged(virtualDesktopId, realmName);
-            }
-            else if (string.Equals(operation, "save-locked-merge-new-icons", StringComparison.OrdinalIgnoreCase))
-            {
-                iconLayouts.SaveLockedMergeNewIcons(virtualDesktopId, realmName);
-            }
-            else if (string.Equals(operation, "restore", StringComparison.OrdinalIgnoreCase))
-            {
-                iconLayouts.Restore(virtualDesktopId, realmName);
-            }
-            else
-            {
-                throw new InvalidOperationException($"Unknown worker operation: {operation}");
+                IconWorkerRequest? request = null;
+                IconWorkerResponse response;
+
+                try
+                {
+                    IconWorkerProtocol.ValidateJsonLine(line, "request");
+                    request = JsonSerializer.Deserialize<IconWorkerRequest>(line, jsonOptions)
+                        ?? throw new InvalidOperationException("Icon worker request deserialized to null.");
+
+                    if (string.Equals(request.Operation, "shutdown", StringComparison.OrdinalIgnoreCase))
+                    {
+                        response = new IconWorkerResponse(request.Id, true, null);
+                        Console.WriteLine(JsonSerializer.Serialize(response, jsonOptions));
+                        Console.Out.Flush();
+                        logger.Info("Persistent icon worker server received shutdown.");
+                        return;
+                    }
+
+                    ExecuteIconWorkerRequest(iconLayouts, request);
+                    response = new IconWorkerResponse(request.Id, true, null);
+                }
+                catch (Exception ex)
+                {
+                    logger.Error("Persistent icon worker command failed", ex);
+                    response = new IconWorkerResponse(
+                        request?.Id ?? Guid.Empty,
+                        false,
+                        ex.ToString());
+                }
+
+                Console.WriteLine(JsonSerializer.Serialize(response, jsonOptions));
+                Console.Out.Flush();
             }
 
-            logger.Info($"Icon layout worker completed: {operation} {realmName} {virtualDesktopId:B}");
-            Environment.Exit(0);
+            logger.Warn("Persistent icon worker input stream closed.");
         }
         catch (Exception ex)
         {
-            logger.Error("Icon layout worker failed", ex);
+            logger.Error("Persistent icon worker server failed", ex);
             try
             {
                 Console.Error.WriteLine(ex);
             }
             catch
             {
-                // WinExe can have no attached console; logging above is authoritative.
+                // Redirected stderr may already be unavailable.
             }
 
-            Environment.Exit(31);
+            Environment.Exit(32);
         }
+    }
+
+    private static void ExecuteIconWorkerRequest(
+        IconLayoutPersistenceService iconLayouts,
+        IconWorkerRequest request)
+    {
+        if (string.Equals(request.Operation, "save", StringComparison.OrdinalIgnoreCase))
+        {
+            iconLayouts.Save(request.VirtualDesktopId, request.RealmName);
+            return;
+        }
+
+        if (string.Equals(request.Operation, "save-current-variant", StringComparison.OrdinalIgnoreCase))
+        {
+            iconLayouts.SaveCurrentVariant(request.VirtualDesktopId, request.RealmName);
+            return;
+        }
+
+        if (string.Equals(request.Operation, "save-if-changed", StringComparison.OrdinalIgnoreCase))
+        {
+            iconLayouts.SaveIfChanged(request.VirtualDesktopId, request.RealmName);
+            return;
+        }
+
+        if (string.Equals(request.Operation, "save-locked-merge-new-icons", StringComparison.OrdinalIgnoreCase))
+        {
+            iconLayouts.SaveLockedMergeNewIcons(request.VirtualDesktopId, request.RealmName);
+            return;
+        }
+
+        if (string.Equals(request.Operation, "restore-when-ready", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(request.RealmPath))
+            {
+                throw new InvalidOperationException("restore-when-ready requires realmPath.");
+            }
+
+            iconLayouts.RestoreWhenReady(
+                request.VirtualDesktopId,
+                request.RealmName,
+                request.RealmPath,
+                request.ReadinessTimeoutMs,
+                request.VerificationTimeoutMs);
+            return;
+        }
+
+        throw new InvalidOperationException($"Unknown persistent icon worker operation: {request.Operation}");
     }
 
     private static void LogUnhandled(string source, Exception ex)

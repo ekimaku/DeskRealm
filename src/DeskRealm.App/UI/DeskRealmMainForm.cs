@@ -52,6 +52,7 @@ internal sealed class DeskRealmMainForm : Form
     private readonly Action _reloadHotkeys;
     private readonly Action _exitApplication;
     private readonly Action _firstRunCompleted;
+    private readonly Action<string, Action, Action<Exception?>> _runSerializedAction;
     private readonly FileLogger _logger;
 
     private readonly TextBox _statusBox = new()
@@ -117,6 +118,7 @@ internal sealed class DeskRealmMainForm : Form
         Action reloadHotkeys,
         Action exitApplication,
         Action firstRunCompleted,
+        Action<string, Action, Action<Exception?>> runSerializedAction,
         FileLogger logger)
     {
         _switchService = switchService;
@@ -125,6 +127,7 @@ internal sealed class DeskRealmMainForm : Form
         _reloadHotkeys = reloadHotkeys;
         _exitApplication = exitApplication;
         _firstRunCompleted = firstRunCompleted;
+        _runSerializedAction = runSerializedAction;
         _logger = logger;
 
         Text = "DeskRealm";
@@ -435,7 +438,7 @@ internal sealed class DeskRealmMainForm : Form
 
         var pill = new Label
         {
-            Text = "v0.5.9 UX",
+            Text = "v0.6.0 FLOW",
             AutoSize = false,
             Width = 128,
             Height = 32,
@@ -602,7 +605,7 @@ internal sealed class DeskRealmMainForm : Form
                 "• Icon layouts can be saved, restored and locked per realm/layout." + Environment.NewLine + Environment.NewLine +
                 "DeskRealm stays discreet by design: closing this window hides it to the tray. " +
                 "To really stop the app, use Quit DeskRealm from this UI or from the tray menu." + Environment.NewLine + Environment.NewLine +
-                "Default hotkeys since v0.5.9:" + Environment.NewLine +
+                "Default hotkeys:" + Environment.NewLine +
                 "• Desktop 1: Win+Shift+X" + Environment.NewLine +
                 "• Desktop 2: Win+Shift+C" + Environment.NewLine +
                 "• Desktop 3: Win+Shift+B" + Environment.NewLine +
@@ -664,7 +667,7 @@ internal sealed class DeskRealmMainForm : Form
         var buttons = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = ShellBackground };
         var save = CreateActionButton("Save + reload", 150, ShellBorderStrong);
         save.Click += (_, _) => SafeAction("Save hotkeys", SaveHotkeysFromUi);
-        var reset = CreateActionButton("Reset v0.5.9 defaults", 190, ShellAmber);
+        var reset = CreateActionButton("Reset defaults", 190, ShellAmber);
         reset.Click += (_, _) => SafeAction("Reset hotkeys", ResetHotkeysToDefaults);
         buttons.Controls.Add(save);
         buttons.Controls.Add(reset);
@@ -768,12 +771,12 @@ internal sealed class DeskRealmMainForm : Form
         root.Controls.Add(apply);
 
         root.Controls.Add(CreateSectionLabel("DeskRealm actions"));
-        AddActionButton(root, "Refresh now", () => _switchService.SwitchNow());
-        AddActionButton(root, "Sync names now", () => _switchService.SyncRealmNamesNow());
+        AddSerializedActionButton(root, "Refresh now", () => _switchService.SwitchNow());
+        AddSerializedActionButton(root, "Sync names now", () => _switchService.SyncRealmNamesNow());
         AddActionButton(root, "Save icon layout now", ConfirmAndSaveIconLayoutNow);
-        AddActionButton(root, "Restore icon layout now", () => _switchService.RestoreIconLayoutNow());
-        AddActionButton(root, "Restore original Desktop", () => _switchService.RestoreOriginalDesktop());
-        AddActionButton(root, "Create original Desktop shortcuts", () => _switchService.CreateOriginalDesktopShortcutsInManagedRealms());
+        AddSerializedActionButton(root, "Restore icon layout now", () => _switchService.RestoreIconLayoutNow());
+        AddSerializedActionButton(root, "Restore original Desktop", () => _switchService.RestoreOriginalDesktop());
+        AddSerializedActionButton(root, "Create original Desktop shortcuts", () => _switchService.CreateOriginalDesktopShortcutsInManagedRealms());
 
         root.Controls.Add(CreateSectionLabel("Open"));
         AddActionButton(root, "Open realms", () => OpenPath(_switchService.Config.RealmsRoot!));
@@ -848,6 +851,13 @@ internal sealed class DeskRealmMainForm : Form
     {
         var button = CreateActionButton(label, 270, ShellBorderStrong);
         button.Click += (_, _) => SafeAction(label, action);
+        parent.Controls.Add(button);
+    }
+
+    private void AddSerializedActionButton(Control parent, string label, Action action)
+    {
+        var button = CreateActionButton(label, 270, ShellBorderStrong);
+        button.Click += (_, _) => RunSerializedUiAction(label, action);
         parent.Controls.Add(button);
     }
 
@@ -994,21 +1004,29 @@ internal sealed class DeskRealmMainForm : Form
         var lockButton = CreateActionButton(realm.IsLocked ? "Unlock" : "Lock", 86, realm.IsLocked ? ShellAmber : ShellBorderStrong);
         lockButton.Margin = new Padding(8, 8, 0, 8);
         _toolTip.SetToolTip(lockButton, realm.IsLocked ? "Unlock this realm" : "Lock this realm");
-        lockButton.Click += (_, _) => SafeAction(realm.IsLocked ? "Unlock realm" : "Lock realm", () =>
+        lockButton.Click += (_, _) =>
         {
-            var target = realm.Layouts.FirstOrDefault()?.DesktopId
-                ?? throw new InvalidOperationException("Realm has no layout to lock.");
-            if (realm.IsLocked)
+            var target = realm.Layouts.FirstOrDefault()?.DesktopId;
+            if (!target.HasValue)
             {
-                _switchService.UnlockRealmLayoutsForDesktop(target);
-            }
-            else
-            {
-                _switchService.LockRealmLayoutsForDesktop(target);
+                SafeAction("Resolve realm lock target", () => throw new InvalidOperationException("Realm has no layout to lock."));
+                return;
             }
 
-            RefreshIconLayoutTree();
-        });
+            RunSerializedUiAction(
+                realm.IsLocked ? "Unlock realm" : "Lock realm",
+                () =>
+                {
+                    if (realm.IsLocked)
+                    {
+                        _switchService.UnlockRealmLayoutsForDesktop(target.Value);
+                    }
+                    else
+                    {
+                        _switchService.LockRealmLayoutsForDesktop(target.Value);
+                    }
+                });
+        };
         header.Controls.Add(lockButton, 3, 0);
         cardLayout.Controls.Add(header, 0, 0);
 
@@ -1129,19 +1147,19 @@ internal sealed class DeskRealmMainForm : Form
         _toolTip.SetToolTip(lockButton, inheritedLock
             ? realmLocked ? "Disabled because the parent realm is locked" : "Disabled because this desktop layout is globally locked"
             : variant.IsVariantLocked ? "Unlock this layout variant" : "Lock this layout variant");
-        lockButton.Click += (_, _) => SafeAction(variant.IsVariantLocked ? "Unlock layout variant" : "Lock layout variant", () =>
-        {
-            if (variant.IsVariantLocked)
+        lockButton.Click += (_, _) => RunSerializedUiAction(
+            variant.IsVariantLocked ? "Unlock layout variant" : "Lock layout variant",
+            () =>
             {
-                _switchService.UnlockIconLayoutVariant(desktopLayout.DesktopId, variant.DisplayTopologyKey);
-            }
-            else
-            {
-                _switchService.LockIconLayoutVariant(desktopLayout.DesktopId, variant.DisplayTopologyKey);
-            }
-
-            RefreshIconLayoutTree();
-        });
+                if (variant.IsVariantLocked)
+                {
+                    _switchService.UnlockIconLayoutVariant(desktopLayout.DesktopId, variant.DisplayTopologyKey);
+                }
+                else
+                {
+                    _switchService.LockIconLayoutVariant(desktopLayout.DesktopId, variant.DisplayTopologyKey);
+                }
+            });
         row.Controls.Add(lockButton, 3, 0);
         rowPanel.Controls.Add(row);
         return rowPanel;
@@ -1176,10 +1194,9 @@ internal sealed class DeskRealmMainForm : Form
             return;
         }
 
-        _switchService.DeleteIconLayoutVariant(desktopLayout.DesktopId, variant.DisplayTopologyKey);
-        RefreshLockState();
-        RefreshIconLayoutTree();
-        RefreshStatus();
+        RunSerializedUiAction(
+            "Delete layout variant",
+            () => _switchService.DeleteIconLayoutVariant(desktopLayout.DesktopId, variant.DisplayTopologyKey));
     }
 
     private static string BuildVariantDisplaySummary(IconLayoutVariantSnapshot variant)
@@ -1254,7 +1271,7 @@ internal sealed class DeskRealmMainForm : Form
         if (locked)
         {
             var result = MessageBox.Show(
-                "This layout or its realm is locked. A manual save will replace the protected positions with the current Desktop state.\n\nOverwrite the locked layout?",
+                "This layout or its realm is locked. A manual save will replace only the active display-topology variant with the current Desktop positions. Other saved variants will remain unchanged.\n\nOverwrite the active locked variant?",
                 "DeskRealm — locked layout",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning,
@@ -1267,9 +1284,9 @@ internal sealed class DeskRealmMainForm : Form
             }
         }
 
-        _switchService.SaveIconLayoutNow(overwriteLockedLayout: locked);
-        RefreshLockState();
-        RefreshIconLayoutTree();
+        RunSerializedUiAction(
+            "Save icon layout now",
+            () => _switchService.SaveIconLayoutNow(overwriteLockedLayout: locked));
     }
 
     private void AssignInitialDesktop()
@@ -1279,30 +1296,41 @@ internal sealed class DeskRealmMainForm : Form
             throw new InvalidOperationException("Select a target virtual desktop before associating the initial Desktop.");
         }
 
-        _switchService.ImportOriginalDesktopToVirtualDesktop(choice.Desktop.Id, linkOriginalDesktop: true, saveLayout: _saveInitialLayoutCheck.Checked);
-        _firstRunPanel.Visible = false;
-        _firstRunStateLabel.Text = "Initial Desktop associated.";
-        _firstRunCompleted();
-        RefreshAll();
-        MessageBox.Show(
-            "Initial Desktop associated without moving files.",
-            "DeskRealm — first run",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
+        var desktopId = choice.Desktop.Id;
+        var saveLayout = _saveInitialLayoutCheck.Checked;
+        RunSerializedUiAction(
+            "Associate initial Desktop",
+            () => _switchService.ImportOriginalDesktopToVirtualDesktop(desktopId, linkOriginalDesktop: true, saveLayout: saveLayout),
+            () =>
+            {
+                _firstRunPanel.Visible = false;
+                _firstRunStateLabel.Text = "Initial Desktop associated.";
+                _firstRunCompleted();
+                MessageBox.Show(
+                    "Initial Desktop associated without moving files.",
+                    "DeskRealm — first run",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            });
     }
 
     private void SkipInitialDesktopImportWithShortcuts()
     {
-        var count = _switchService.SkipInitialDesktopImportAndCreateOriginalDesktopShortcuts();
-        _firstRunPanel.Visible = false;
-        _firstRunStateLabel.Text = $"Import skipped. Shortcuts created: {count}.";
-        _firstRunCompleted();
-        RefreshAll();
-        MessageBox.Show(
-            $"Association skipped. DeskRealm created {count} shortcut(s) to the original Desktop inside managed realms.",
-            "DeskRealm — first run",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
+        var count = 0;
+        RunSerializedUiAction(
+            "Skip initial Desktop import",
+            () => count = _switchService.SkipInitialDesktopImportAndCreateOriginalDesktopShortcuts(),
+            () =>
+            {
+                _firstRunPanel.Visible = false;
+                _firstRunStateLabel.Text = $"Import skipped. Shortcuts created: {count}.";
+                _firstRunCompleted();
+                MessageBox.Show(
+                    $"Association skipped. DeskRealm created {count} shortcut(s) to the original Desktop inside managed realms.",
+                    "DeskRealm — first run",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            });
     }
 
     private void ConfigureHotkeyCaptureBox(int desktopNumber, TextBox box)
@@ -1599,7 +1627,9 @@ internal sealed class DeskRealmMainForm : Form
             $"Icon layout locked   : {ReadBoolStatus(() => _switchService.IsCurrentLayoutLocked())}{Environment.NewLine}" +
             $"Icon variant locked  : {ReadBoolStatus(() => _switchService.IsCurrentLayoutVariantLocked())}{Environment.NewLine}" +
             $"Realm layout locked  : {ReadBoolStatus(() => _switchService.IsCurrentRealmLocked())}{Environment.NewLine}" +
-            $"Icon settle delay    : {_switchService.Config.IconLayoutSettleDelayMs} ms{Environment.NewLine}" +
+            $"Shell ready timeout : {_switchService.Config.ShellViewReadyTimeoutMs} ms{Environment.NewLine}" +
+            $"Icon verify timeout : {_switchService.Config.IconLayoutRestoreVerificationTimeoutMs} ms{Environment.NewLine}" +
+            $"Icon runtime status : {_switchService.IconLayoutRuntimeStatus}{Environment.NewLine}" +
             $"Desktop hotkeys      : {_switchService.Config.DesktopHotkeysEnabled}{Environment.NewLine}" +
             $"Hotkey bindings      : {string.Join(", ", _switchService.Config.DesktopHotkeys.OrderBy(p => p.Key).Select(p => $"#{p.Key}={p.Value}"))}{Environment.NewLine}" +
             $"Start with Windows   : {_switchService.Config.StartWithWindows}{Environment.NewLine}" +
@@ -1625,6 +1655,22 @@ internal sealed class DeskRealmMainForm : Form
         {
             return "unavailable: " + ex.Message;
         }
+    }
+
+    private void RunSerializedUiAction(string name, Action action, Action? onSuccess = null)
+    {
+        _runSerializedAction(
+            name,
+            action,
+            error =>
+            {
+                if (error is not null)
+                {
+                    return;
+                }
+
+                onSuccess?.Invoke();
+            });
     }
 
     private void SafeAction(string name, Action action)

@@ -1,173 +1,74 @@
-# DeskRealm — Technical audit v0.5.9
+# DeskRealm — Technical audit v0.6.0
 
-## Scope
+## Scope and verified base
 
-This audit covers the `v0.5.8` -> `v0.5.9` release delta.
+The performance milestone was rebuilt from the verified local source archive. The audit explicitly protects the embedded icon, README demo, first-run onboarding, capture-based hotkeys, layout/realm/variant locks, multi-display variant metadata and variant deletion.
 
-`v0.5.8` stabilized the high-risk first-run model by associating the original Windows Desktop path without moving files. `v0.5.9` keeps that safety model and adds a user-facing UX layer around onboarding, hotkeys, layout management, realm/layout locks and runtime actions.
 
-## Version alignment
+## Release-control status — 2026-06-19
 
-| Item | Expected | Status |
-|---|---:|---|
-| Project version | `0.5.9` | aligned |
-| Config version | `10` | aligned |
-| Icon layout model version | `3` | unchanged |
-| Public UI language | English | aligned |
-| Changelog release section | `## v0.5.9` | compatible with release helper |
-| Root ZIP folder | `DeskRealm/` | required for source package |
+The current package is a documentation/release-control pass over the validated performance build. No runtime code changes are introduced in this pass. Static source/package checks remain required in the Linux sandbox, while Windows-specific Explorer/COM behavior is validated on the user's machine.
 
-## Branding/icon integration
+Validated locally so far:
 
-The v0.5.9 release now includes a proper DeskRealm icon path:
+- Debug source run through `scripts\Run-DeskRealm.ps1`.
+- Startup existing-realm layout recovery.
+- Parallel DeskRealm-hotkey destination preparation and smooth switch behavior.
+- Targeted Shell refresh and persistent worker startup.
 
-- `Assets/DeskRealm.ico` is referenced by `DeskRealm.App.csproj` as the application icon.
-- `DeskRealmIcon` extracts the embedded executable icon for the tray and main window.
-- The old generic `SystemIcons.Application` tray icon is no longer used during normal operation.
-- Icon extraction failures are logged with `WARN` before the default icon is used.
+Still required before Git release:
 
-## Release-helper compatibility
+- Self-contained Release build through `scripts\Build-Release.ps1`.
+- Full `SMOKE_TEST.md` checklist pass.
+- Final published portable/install-bundle asset smoke test.
 
-The local release helper extracts release notes from `CHANGELOG.md` by locating the requested `## v0.5.9` section and taking every line until the next `##` release heading.
+## Platform audit
 
-The `v0.5.9` changelog section is therefore kept as the source of truth and includes all user-facing and technical categories needed for the GitHub Release body:
+| Component | v0.6.0 decision |
+|---|---|
+| Runtime / SDK | .NET 10, SDK policy `10.0.301` |
+| Language | C# 14 |
+| UI | Windows Forms retained |
+| Shell integration | Known Folder API, `SHChangeNotify`, `IFolderView` retained |
+| Virtual desktop discovery | Explorer registry state retained |
+| External NuGet packages | None |
+| Node/npm/Vite/React/TypeScript/Three/Dexie | Not used; milestone npm audit is not applicable |
+| Release output | Self-contained single-file `win-x64` retained |
 
-- Added
-- Changed
-- Fixed
-- Safety
-- Documentation
+WinForms and the Shell COM APIs are not the principal latency source. The previous cost came from fixed waits, work executed on the UI thread, repeated worker startup and broad refresh behavior. The milestone modernizes orchestration rather than replacing stable native integration merely for novelty.
 
-## User-facing additions
+## Removed fixed-time behavior
 
-- `DeskRealmMainForm` provides a tray-opened UI for onboarding, hotkeys, Icon Layout management, actions/options and status.
-- Normal launches remain tray-first; fresh configs open the UI before the first automatic Desktop switch.
-- The window close button hides to tray. **Quit DeskRealm** is the explicit exit path.
-- The UI includes the main tray actions so non-technical users do not need to discover everything through the context menu.
-- The visible shell is modernized with dark custom chrome, owner-painted navigation/buttons/cards/pills and readable disabled states.
+Retired configuration fields include periodic poll intervals, initial hotkey delays, fixed desktop-step delays, restore settle delays and retry counts/delays. Remaining timeout values are upper guardrails. Short adaptive waits yield/back off only while checking concrete state.
 
-## First-run behavior
+## Runtime pipeline
 
-- First automatic polling/switching is delayed until onboarding is complete.
-- Association of the original Desktop remains no-move and uses an absolute path assignment.
-- Skip flow creates `DeskRealm - Original Desktop.lnk` shortcuts inside managed realm folders.
-- Shortcut creation failures are surfaced explicitly.
+1. A registry notification or DeskRealm hotkey requests reconciliation.
+2. Raw notifications are coalesced.
+3. One semaphore serializes Shell/state-changing operations from tray, hotkeys, registry reconciliation and the main window outside the UI thread.
+4. Direct hotkeys resolve the destination GUID/realm/topology, save the active source layout, and wait for physical modifiers to be released.
+5. Confirmed Windows navigation and destination Known Folder/Shell/layout preparation then run concurrently. A final GUID plus layout-result barrier commits the target; a mismatch triggers explicit compensation to the actual active desktop realm.
+6. The persistent STA worker enumerates visible PIDLs with `IFolderView::Items` / `IEnumIDList`, avoiding stale count/index traversal while Explorer mutates the view.
+7. `E_BOUNDS` / `E_CHANGED_STATE` during collection replacement reset readiness stability and retry within the same bounded timeout.
+8. During the same automatic transition-aware path, `E_FAIL` from live `IFolderView` operations is also interpreted as invalidation of a previously enumerated view. This covers direct jumps across multiple virtual desktops; the classification is not enabled for strict manual save/restore.
+9. Reboot recovery no longer depends on `RestoreDesktopOnExit` completing. If the process starts while the Known Folder already targets the current realm, the first reconciliation performs an adaptive restore once instead of returning early.
+10. The worker waits until Explorer exposes the exact target realm entries (plus allowed Public Desktop / namespace items).
+11. Saved coordinates are applied with `IFolderView` and verified; reapplication occurs only while unresolved positions remain.
+12. Manual save is routed through `save-current-variant`, not the generic worker command. Mutation is scoped to the exact active topology key; all non-current variants are fingerprinted before mutation and again after serialization/deserialization.
+13. The previous `.Take(24)` behavior is removed from variant upsert. At capacity, creation of a new topology fails explicitly rather than evicting the oldest unrelated variant.
+14. Failures are explicit. Only the documented transition context retries `E_FAIL`; unrelated failures disable icon persistence for the session rather than silently switching behavior.
 
-## Hotkey behavior
+## Compatibility and migration
 
-- Defaults changed to `Win+Shift+X/C/B/N` for desktops 1-4.
-- Migration preserves existing custom hotkeys and only replaces untouched legacy defaults.
-- Hotkey fields are capture-based, not free-form text entry.
-- Capture records the shortcut on the first non-modifier key.
-- Capture cancels if only modifiers are released.
-- Later modifiers are ignored after the main key because capture has already stopped.
-- Duplicate/invalid shortcuts are rejected explicitly after normalization.
+Config schema `11` removes retired timing settings and introduces:
 
-## Pause semantics
+- `shellViewReadyTimeoutMs`
+- `iconLayoutRestoreVerificationTimeoutMs`
+- `hotkeyModifierReleaseTimeoutMs`
+- `desktopStepConfirmationTimeoutMs`
 
-`Config.Enabled` is now documented and presented as **Enable realm switching automation**.
+Assignments, hotkeys, startup preference, first-run state, layout locks, realm locks and topology-variant locks remain preserved.
 
-When disabled:
+## Known validation boundary
 
-- watch-loop switching is paused;
-- direct DeskRealm desktop hotkeys are ignored;
-- manual refresh/switch paths refuse to switch realms explicitly;
-- existing assignments, realm folders, icons, files and layouts are not changed.
-
-This removes the ambiguous state where disabling DeskRealm appeared to pause only icon positioning while hotkeys could still move realms.
-
-## Icon Layout management
-
-The **Icon Layout** tab now reflects the real persisted model:
-
-```text
-Realm path
-  -> layout JSON file for a virtual desktop GUID
-     -> display-topology variants
-```
-
-Child rows are saved `variants` from `%APPDATA%\DeskRealm\icon-layouts\<desktop-guid>.json`. Rows show each monitor working area separately and mark the primary display.
-
-Lock scopes:
-
-```text
-lockedIconLayouts[virtualDesktopGuid]
-lockedRealms[normalizedRealmPath]
-lockedIconLayoutVariants[virtualDesktopGuid|displayTopologyKey]
-```
-
-Realm locks are inherited by child rows and disable child lock/delete actions while keeping the row readable.
-
-## Locked save behavior
-
-Unlocked automatic saves use the normal save-if-changed path.
-
-Locked automatic saves use `save-locked-merge-new-icons`:
-
-- existing saved icon positions are not overwritten;
-- new icons absent from the saved layout can be appended once;
-- full overwrite remains manual and confirmation-gated.
-
-This avoids silent layout contamination while still allowing the user to add a new shortcut to a locked realm.
-
-## Variant deletion
-
-The variant `Delete` action is destructive only for DeskRealm metadata:
-
-- confirmation is required;
-- Desktop files/icons/shortcuts are not deleted;
-- the selected `variants[]` entry is removed from the layout JSON;
-- matching `lockedIconLayoutVariants` config entry is removed;
-- empty layout JSON files are deleted;
-- if variants remain, the newest remaining variant is promoted to the legacy/current top-level fields.
-
-## Documentation alignment
-
-Updated release documentation:
-
-- `README.md`
-- `CHANGELOG.md`
-- `docs/release-notes/v0.5.9.md`
-- `docs/patch-notes/PATCH_NOTES_v0_5_9.md`
-- `docs/CONFIGURATION.md`
-- `docs/INSTALLATION.md`
-- `docs/ARCHITECTURE.md`
-- `docs/SAFETY_AND_PRIVACY.md`
-- `SMOKE_TEST.md`
-- `TODO.md`
-
-Transient block TODO files from the iterative `v0.5.9` implementation were consolidated into `TODO.md` for a cleaner release tree.
-
-## Validation status
-
-Static repository validation completed in this environment:
-
-- `CHANGELOG.md` contains a release-helper-compatible `## v0.5.9` section.
-- `docs/release-notes/v0.5.9.md` exists and documents the user-facing release.
-- `docs/patch-notes/PATCH_NOTES_v0_5_9.md` exists and documents the technical delta.
-- Project version references are aligned to `0.5.9`.
-- Config version references are aligned to `10`.
-- Root package folder is expected to be `DeskRealm/`.
-
-Windows build/runtime validation must still be performed locally with:
-
-```powershell
-.\scripts\Build-Release.ps1
-```
-
-Expected result: release build succeeds without warnings.
-
-## Recommended manual smoke tests
-
-- Fresh first-run onboarding opens before the first automatic switch.
-- Association of original Desktop does not move files.
-- Skip path creates original Desktop shortcuts.
-- UI opens from tray and hides to tray on close.
-- **Quit DeskRealm** exits the app.
-- Hotkey capture records `Win+Ctrl+G` when `G` is pressed.
-- Modifier-only hotkey capture cancels on release.
-- `Win` -> `G` -> `Ctrl` records `Win+G` and ignores the later `Ctrl`.
-- Paused automation ignores DeskRealm desktop hotkeys and refuses manual realm switching.
-- Icon Layout tab shows saved variants, per-monitor working areas and primary markers.
-- Layout/realm/variant locks protect autosaves.
-- Variant deletion removes only the saved layout variant.
+The Linux sandbox cannot execute Windows Explorer, WinForms, registry virtual desktops, COM `IFolderView`, global hotkeys or multi-monitor DPI transitions. Windows Debug/Release build and runtime smoke tests therefore remain mandatory before release.

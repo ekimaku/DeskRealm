@@ -1,12 +1,17 @@
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 
 namespace DeskRealm.App.UI;
 
 internal sealed class RoundedPanel : Panel
 {
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color FillColor { get; set; } = Color.FromArgb(9, 32, 47);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color BorderColor { get; set; } = Color.FromArgb(24, 92, 107);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public int BorderThickness { get; set; } = 1;
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public int Radius { get; set; } = 18;
 
     public RoundedPanel()
@@ -65,15 +70,25 @@ internal sealed class ModernButton : Control
     private bool _hovered;
     private bool _pressed;
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color FillColor { get; set; } = Color.FromArgb(13, 49, 58);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color HoverFillColor { get; set; } = Color.FromArgb(18, 71, 81);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color PressedFillColor { get; set; } = Color.FromArgb(20, 92, 102);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color AccentColor { get; set; } = Color.FromArgb(43, 214, 222);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color MutedAccentColor { get; set; } = Color.FromArgb(24, 92, 107);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color DisabledFillColor { get; set; } = Color.FromArgb(18, 28, 36);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color DisabledBorderColor { get; set; } = Color.FromArgb(47, 69, 78);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color DisabledTextColor { get; set; } = Color.FromArgb(116, 144, 154);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public int Radius { get; set; } = 16;
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public bool Selected { get; set; }
 
     public ModernButton()
@@ -207,9 +222,13 @@ internal sealed class ModernButton : Control
 
 internal sealed class PillLabel : Control
 {
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color FillColor { get; set; } = Color.FromArgb(8, 27, 39);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color BorderColor { get; set; } = Color.FromArgb(24, 92, 107);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color TextColor { get; set; } = Color.FromArgb(231, 251, 255);
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public int Radius { get; set; } = 13;
 
     public PillLabel()

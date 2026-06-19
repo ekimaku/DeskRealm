@@ -1,6 +1,53 @@
 # Changelog
 
-Current stable: `v0.5.9`.
+Current public release: `v0.6.0`.
+
+Previous `0.5.x` builds are superseded by `v0.6.0` and are kept only as historical changelog entries.
+
+## v0.6.0 — Adaptive performance pipeline
+
+### Added
+- Added registry-driven virtual desktop change monitoring with explicit primary-observer failure reporting.
+- Added one serialized background execution lane shared by tray, hotkeys, registry reconciliation and main-window switch/save/restore/lock actions so the WinForms UI remains responsive and state mutations cannot race.
+- Added physical modifier release detection before DeskRealm emits virtual desktop navigation input.
+- Added per-step virtual desktop GUID confirmation for direct desktop hotkeys.
+- Added a parallel hotkey transaction pipeline: after the source layout is saved and modifiers are released, Windows navigation and destination realm loading/restoration start together.
+- Added a persistent STA icon-layout worker with a strict GUID-correlated JSON-lines protocol over BOM-free UTF-8.
+- Added adaptive Shell-view readiness checks requiring exact target-realm membership before icon restore starts.
+- Added adaptive icon-position verification and progress-based reapplication.
+- Added `[PERF]` phase timings and coalesced registry-notification diagnostics.
+- Added a release-control validation document summarizing package, documentation, versioning and remaining Windows checks.
+- Added `VERSION.txt` and a pinned .NET 10 SDK policy through `global.json`.
+
+### Changed
+- Migrated the source project from .NET 8 to .NET 10 / C# 14 while preserving self-contained `win-x64` release output.
+- Replaced periodic virtual desktop polling with registry notifications.
+- Replaced fixed switch, settle and retry delays with state confirmation and bounded adaptive backoff.
+- Reused one icon worker for the session instead of starting one process per save or restore.
+- Changed direct hotkeys so the pre-resolved destination realm no longer waits for the final navigation GUID before its Known Folder, Shell notification and adaptive layout restore begin.
+- Replaced the global Shell broadcast refresh with a targeted directory notification.
+- Deferred hidden-window UI refresh until the DeskRealm window is opened again.
+- Config schema advanced to version `11`; retired timing fields are removed during migration.
+- WinForms custom-control properties now declare explicit designer serialization behavior required by current analyzers.
+- Documentation now includes a clear v0.6.0 performance-gains section for users and reviewers.
+
+### Fixed
+- Fixed reboot/logon recovery when Windows starts DeskRealm while the Desktop Known Folder already points to the current realm. The first reconciliation now performs one adaptive layout restore instead of returning early with `Already on`, so Explorer startup compaction cannot silently become the visible session layout.
+- Fixed confirmation-gated manual save on locked layouts/realms so it replaces only the exact active display-topology variant. A dedicated worker command preserves and fingerprints every non-current variant before and after JSON serialization; the write is refused if another variant changes.
+- Removed silent oldest-variant eviction when a 25th topology would be created. DeskRealm now requires explicit deletion of an obsolete variant instead of modifying unrelated saved layouts.
+- Prevented a changing Explorer Desktop view from aborting startup layout persistence with `E_BOUNDS` / `E_CHANGED_STATE`; visible PIDLs are now enumerated through `IFolderView::Items` / `IEnumIDList`, and transient view invalidation is retried inside the existing adaptive readiness deadline.
+- Prevented a two-or-more-desktop jump from disabling layout persistence when `IFolderView::GetItemPosition` returns transient `E_FAIL` while Explorer replaces the active view. `E_FAIL` is retried only inside the automatic transition-aware restore path; manual save/restore operations remain strict.
+- Prevented UTF-8 BOM bytes from contaminating the first persistent-worker JSON command.
+- Prevented Explorer's partially transitioned icon list from being accepted as the target realm.
+- Prevented registry notification storms from scheduling/logging one reconciliation per raw signal.
+- Preserved the existing branded icon, onboarding, hotkey capture, variant deletion and multi-display metadata while replacing the fragile runtime path.
+
+### Safety
+- Hotkey navigation and target preparation join at a final GUID barrier. If Windows lands on another desktop, DeskRealm explicitly discards the speculative target and restores the realm/layout of the desktop actually active before reporting the mismatch.
+- No silent fallback to polling or worker restarts is introduced.
+- A worker/protocol/restore failure disables icon persistence for the current session and reports the degraded state explicitly; desktop realm switching remains alive.
+- Existing realm, layout and exact topology-variant locks remain enforced.
+- Manual overwrite confirmation authorizes only the current topology variant; it never authorizes bulk replacement or implicit eviction of other variants.
 
 ## v0.5.9 — First-run UX, modern UI and layout controls
 

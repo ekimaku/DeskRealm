@@ -1,51 +1,121 @@
+using System.Diagnostics;
+
 namespace DeskRealm.App.Services;
 
 internal sealed class VirtualDesktopNavigatorService
 {
     private readonly KeyboardInputService _keyboard;
+    private readonly VirtualDesktopRegistryService _virtualDesktop;
     private readonly FileLogger _logger;
 
-    public VirtualDesktopNavigatorService(KeyboardInputService keyboard, FileLogger logger)
+    public VirtualDesktopNavigatorService(
+        KeyboardInputService keyboard,
+        VirtualDesktopRegistryService virtualDesktop,
+        FileLogger logger)
     {
         _keyboard = keyboard;
+        _virtualDesktop = virtualDesktop;
         _logger = logger;
     }
 
-    public void NavigateByNumber(int currentNumber, int targetNumber, int desktopCount, int stepDelayMs)
+    public VirtualDesktopInfo NavigateByNumber(
+        VirtualDesktopInfo current,
+        VirtualDesktopInfo target,
+        IReadOnlyList<VirtualDesktopInfo> desktops,
+        int stepConfirmationTimeoutMs)
     {
-        if (desktopCount < 1)
+        if (desktops.Count < 1)
         {
             throw new InvalidOperationException("No virtual desktop available for navigation.");
         }
 
-        if (targetNumber < 1 || targetNumber > desktopCount)
+        if (current.Id == target.Id)
         {
-            throw new InvalidOperationException($"Target virtual desktop #{targetNumber} not found. Available desktops: 1 to {desktopCount}.");
+            _logger.Info($"Hotkey desktop navigation ignored: already on #{target.Number}.");
+            return current;
         }
 
-        if (currentNumber < 1 || currentNumber > desktopCount)
+        var currentIndex = desktops.ToList().FindIndex(d => d.Id == current.Id);
+        var targetIndex = desktops.ToList().FindIndex(d => d.Id == target.Id);
+        if (currentIndex < 0 || targetIndex < 0)
         {
-            throw new InvalidOperationException($"Invalid current virtual desktop #{currentNumber}. Available desktops: 1 to {desktopCount}.");
+            throw new InvalidOperationException(
+                $"Virtual desktop navigation state changed before input. Current={current.Id:B}, target={target.Id:B}.");
         }
 
-        var delta = targetNumber - currentNumber;
-        if (delta == 0)
+        var direction = targetIndex > currentIndex ? 1 : -1;
+        var total = Math.Abs(targetIndex - currentIndex);
+        var operation = Stopwatch.StartNew();
+        _logger.Info(
+            $"Hotkey desktop navigation: #{current.Number} -> #{target.Number} " +
+            $"({total} confirmed step(s), direction {direction}).");
+
+        var confirmed = current;
+        for (var step = 1; step <= total; step++)
         {
-            _logger.Info($"Hotkey desktop navigation ignored: already on #{targetNumber}.");
+            var expectedIndex = currentIndex + direction * step;
+            var expected = desktops[expectedIndex];
+            var stepWatch = Stopwatch.StartNew();
+
+            _keyboard.SwitchVirtualDesktopStep(direction);
+            confirmed = WaitForDesktop(expected.Id, stepConfirmationTimeoutMs);
+            stepWatch.Stop();
+
+            _logger.Info(
+                $"[PERF] desktop-step {step}/{total}: expected=#{expected.Number} {expected.Id:B}, " +
+                $"confirmed=#{confirmed.Number}, elapsed={stepWatch.Elapsed.TotalMilliseconds:0.0} ms.");
+        }
+
+        operation.Stop();
+        _logger.Info(
+            $"[PERF] desktop-navigation complete: #{current.Number} -> #{target.Number}, " +
+            $"elapsed={operation.Elapsed.TotalMilliseconds:0.0} ms.");
+        return confirmed;
+    }
+
+    public VirtualDesktopInfo WaitForDesktop(Guid expectedDesktopId, int timeoutMs)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        Exception? lastError = null;
+        var probe = 0;
+
+        while (stopwatch.ElapsedMilliseconds <= timeoutMs)
+        {
+            try
+            {
+                var current = _virtualDesktop.GetCurrentVirtualDesktop();
+                if (current.Id == expectedDesktopId)
+                {
+                    return current;
+                }
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+
+            AdaptiveWait(probe++);
+        }
+
+        if (lastError is not null)
+        {
+            _logger.Warn($"Desktop confirmation had registry read errors: {lastError.Message}");
+        }
+
+        var detected = _virtualDesktop.GetCurrentVirtualDesktop();
+        throw new TimeoutException(
+            $"Windows did not confirm virtual desktop {expectedDesktopId:B} within {timeoutMs} ms. " +
+            $"Detected current desktop: #{detected.Number} {detected.Name} {detected.Id:B}.");
+    }
+
+    private static void AdaptiveWait(int probe)
+    {
+        if (probe < 3)
+        {
+            Thread.Yield();
             return;
         }
 
-        var direction = delta > 0 ? 1 : -1;
-        var steps = Math.Abs(delta);
-        _logger.Info($"Hotkey desktop navigation: #{currentNumber} -> #{targetNumber} ({steps} step(s), direction {direction}).");
-
-        for (var i = 0; i < steps; i++)
-        {
-            _keyboard.SwitchVirtualDesktopStep(direction);
-            if (stepDelayMs > 0 && i < steps - 1)
-            {
-                Thread.Sleep(stepDelayMs);
-            }
-        }
+        Thread.Sleep(Math.Min(48, 2 << Math.Min(4, probe - 3)));
     }
 }

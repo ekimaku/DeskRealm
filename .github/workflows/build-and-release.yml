@@ -22,7 +22,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Resolve version
         id: version
@@ -31,7 +31,7 @@ jobs:
           if ($env:GITHUB_REF -like 'refs/tags/v*') {
             $version = $env:GITHUB_REF_NAME.TrimStart('v')
           } else {
-            $version = '0.5.9-dev'
+            $version = '0.6.0-dev'
           }
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$env:GITHUB_REF_NAME" >> $env:GITHUB_OUTPUT
@@ -60,6 +60,7 @@ jobs:
           Copy-Item LICENSE $publishDir -Force
           Copy-Item NOTICE $publishDir -Force
           Copy-Item README.md $publishDir -Force
+          Copy-Item VERSION.txt $publishDir -Force
           New-Item -ItemType Directory -Force -Path (Join-Path $publishDir 'docs') | Out-Null
           Copy-Item docs/SAFETY_AND_PRIVACY.md (Join-Path $publishDir 'docs') -Force
           Copy-Item scripts/Restore-Desktop.ps1 $publishDir -Force

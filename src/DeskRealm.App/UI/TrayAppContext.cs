@@ -1,4 +1,5 @@
 using DeskRealm.App.Services;
+using Microsoft.Win32;
 using System.Diagnostics;
 
 namespace DeskRealm.App.UI;
@@ -9,11 +10,19 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly RealmConfigService _configService;
     private readonly GlobalHotkeyService _hotkeys;
     private readonly StartupService _startupService;
+    private readonly VirtualDesktopChangeMonitor _desktopChanges;
+    private readonly IconLayoutWorkerClientService _iconWorker;
     private readonly FileLogger _logger;
-    private readonly System.Windows.Forms.Timer _timer;
     private readonly NotifyIcon _notifyIcon;
     private readonly Icon _appIcon;
-    private bool _pollingStarted;
+    private readonly Control _uiDispatcher = new();
+    private readonly SemaphoreSlim _operationGate = new(1, 1);
+    private readonly CancellationTokenSource _shutdown = new();
+    private bool _monitoringStarted;
+    private int _reconcileRequested;
+    private int _reconcileRunnerActive;
+    private int _registryNotificationsPending;
+    private string _latestRegistryNotificationSource = "unknown";
     private DeskRealmMainForm? _mainForm;
 
     public TrayAppContext(
@@ -21,14 +30,19 @@ internal sealed class TrayAppContext : ApplicationContext
         RealmConfigService configService,
         GlobalHotkeyService hotkeys,
         StartupService startupService,
+        VirtualDesktopChangeMonitor desktopChanges,
+        IconLayoutWorkerClientService iconWorker,
         FileLogger logger)
     {
         _switchService = switchService;
         _configService = configService;
         _hotkeys = hotkeys;
         _startupService = startupService;
+        _desktopChanges = desktopChanges;
+        _iconWorker = iconWorker;
         _logger = logger;
 
+        _uiDispatcher.CreateControl();
         _switchService.Initialize();
         SynchronizeStartupFromConfig(showErrors: false);
 
@@ -44,12 +58,9 @@ internal sealed class TrayAppContext : ApplicationContext
 
         _hotkeys.DesktopHotkeyPressed += OnDesktopHotkeyPressed;
         var hotkeyErrors = _hotkeys.Start(_switchService.Config);
-
-        _timer = new System.Windows.Forms.Timer
-        {
-            Interval = _switchService.Config.PollIntervalMs
-        };
-        _timer.Tick += (_, _) => SafeTick();
+        _desktopChanges.Changed += OnDesktopRegistryChanged;
+        _desktopChanges.Faulted += OnDesktopMonitorFaulted;
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
         var waitingForFirstRunDecision = _switchService.ShouldOfferInitialDesktopImport();
         if (waitingForFirstRunDecision)
@@ -58,14 +69,14 @@ internal sealed class TrayAppContext : ApplicationContext
         }
         else
         {
-            StartPollingIfNeeded();
+            StartMonitoringIfNeeded();
         }
 
         var balloonText = waitingForFirstRunDecision
             ? "First-run setup must be completed before the first automatic switch."
             : hotkeyErrors.Count == 0
-                ? "Native switching is active. Desktop hotkeys are active."
-                : "Native switching is active. Some hotkeys were rejected; check logs.";
+                ? "Adaptive switching is active. Desktop hotkeys are active."
+                : "Adaptive switching is active. Some hotkeys were rejected; check logs.";
         _notifyIcon.ShowBalloonTip(3500, "DeskRealm", balloonText, hotkeyErrors.Count == 0 ? ToolTipIcon.Info : ToolTipIcon.Warning);
     }
 
@@ -74,11 +85,11 @@ internal sealed class TrayAppContext : ApplicationContext
         var menu = new ContextMenuStrip();
 
         menu.Items.Add("Open DeskRealm", null, (_, _) => ShowDeskRealmUi(firstRun: false));
-        menu.Items.Add("Refresh now", null, (_, _) => SafeAction("Refresh now", () => _switchService.SwitchNow()));
-        menu.Items.Add("Sync names now", null, (_, _) => SafeAction("Sync names now", () => _switchService.SyncRealmNamesNow()));
-        menu.Items.Add("Save icon layout now", null, (_, _) => SafeAction("Save icon layout now", ConfirmAndSaveIconLayoutNow));
-        menu.Items.Add("Restore icon layout now", null, (_, _) => SafeAction("Restore icon layout now", () => _switchService.RestoreIconLayoutNow()));
-        menu.Items.Add("Reload hotkeys from config", null, (_, _) => SafeAction("Reload hotkeys", ReloadHotkeys));
+        menu.Items.Add("Refresh now", null, (_, _) => QueueAction("Refresh now", () => _switchService.SwitchNow()));
+        menu.Items.Add("Sync names now", null, (_, _) => QueueAction("Sync names now", () => _switchService.SyncRealmNamesNow()));
+        menu.Items.Add("Save icon layout now", null, (_, _) => ConfirmAndSaveIconLayoutNow());
+        menu.Items.Add("Restore icon layout now", null, (_, _) => QueueAction("Restore icon layout now", () => _switchService.RestoreIconLayoutNow()));
+        menu.Items.Add("Reload hotkeys from config", null, (_, _) => SafeUiAction("Reload hotkeys", ReloadHotkeys));
         menu.Items.Add("Pause / Resume", null, (_, _) => TogglePause());
 
         var startupItem = new ToolStripMenuItem("Start with Windows")
@@ -94,7 +105,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add("Open config", null, (_, _) => OpenPath(AppPaths.ConfigPath));
         menu.Items.Add("Open logs", null, (_, _) => OpenPath(AppPaths.LogFilePath));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Restore original Desktop", null, (_, _) => SafeAction("Restore", () => _switchService.RestoreOriginalDesktop()));
+        menu.Items.Add("Restore original Desktop", null, (_, _) => QueueAction("Restore", () => _switchService.RestoreOriginalDesktop()));
         menu.Items.Add("Quit", null, (_, _) => ExitThread());
 
         return menu;
@@ -102,26 +113,72 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void OnDesktopHotkeyPressed(int desktopNumber, string hotkey)
     {
-        if (!_switchService.Config.Enabled)
+        QueueAction($"Hotkey {hotkey}", () => _switchService.SwitchToDesktopNumber(desktopNumber));
+    }
+
+    private void OnDesktopRegistryChanged(string source)
+    {
+        _latestRegistryNotificationSource = source;
+        Interlocked.Increment(ref _registryNotificationsPending);
+        QueueReconcile("registry-notification");
+    }
+
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    {
+        _logger.Info("Display settings change notification received.");
+        QueueReconcile("display-settings-change");
+    }
+
+    private void OnDesktopMonitorFaulted(Exception error)
+    {
+        _logger.Error("Virtual desktop change monitor faulted", error);
+        PostToUi(() => _notifyIcon.ShowBalloonTip(
+            7000,
+            "DeskRealm — monitor stopped",
+            error.Message,
+            ToolTipIcon.Error));
+    }
+
+    private void QueueReconcile(string reason)
+    {
+        if (_shutdown.IsCancellationRequested)
         {
-            _logger.Info($"Hotkey ignored while DeskRealm is disabled: {hotkey} -> desktop #{desktopNumber}");
-            _notifyIcon.ShowBalloonTip(2000, "DeskRealm", "DeskRealm is paused. Enable realm switching automation to use desktop hotkeys.", ToolTipIcon.Info);
-            _mainForm?.RefreshAll();
             return;
         }
 
-        SafeAction($"Hotkey {hotkey}", () =>
+        Interlocked.Exchange(ref _reconcileRequested, 1);
+        if (Interlocked.CompareExchange(ref _reconcileRunnerActive, 1, 0) == 0)
         {
-            // WM_HOTKEY is raised while the triggering keys may still be physically down.
-            // A tiny delay avoids turning the synthetic Win+Ctrl+Arrow into Win+Ctrl+Shift+Arrow
-            // when the configured hotkey itself uses Shift.
-            if (_switchService.Config.HotkeyInitialDelayMs > 0)
-            {
-                Thread.Sleep(_switchService.Config.HotkeyInitialDelayMs);
-            }
+            _ = ReconcileLoopAsync(reason);
+        }
+    }
 
-            _switchService.SwitchToDesktopNumber(desktopNumber);
-        });
+    private async Task ReconcileLoopAsync(string initialReason)
+    {
+        var reason = initialReason;
+        try
+        {
+            while (!_shutdown.IsCancellationRequested && Interlocked.Exchange(ref _reconcileRequested, 0) == 1)
+            {
+                var notificationCount = Interlocked.Exchange(ref _registryNotificationsPending, 0);
+                if (notificationCount > 0)
+                {
+                    _logger.Info(
+                        $"Virtual desktop registry notifications coalesced: count={notificationCount}, latest={_latestRegistryNotificationSource}.");
+                }
+
+                await RunSerializedAsync($"Reconcile ({reason})", _switchService.Tick, showDialogOnError: false);
+                reason = "coalesced-notification";
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _reconcileRunnerActive, 0);
+            if (Volatile.Read(ref _reconcileRequested) == 1 && !_shutdown.IsCancellationRequested)
+            {
+                QueueReconcile("late-notification");
+            }
+        }
     }
 
     private void ConfirmAndSaveIconLayoutNow()
@@ -130,7 +187,7 @@ internal sealed class TrayAppContext : ApplicationContext
         if (locked)
         {
             var result = MessageBox.Show(
-                "This layout or its realm is locked. A manual save will replace the protected positions with the current Desktop state.\n\nOverwrite the locked layout?",
+                "This layout or its realm is locked. A manual save will replace only the active display-topology variant with the current Desktop positions. Other saved variants will remain unchanged.\n\nOverwrite the active locked variant?",
                 "DeskRealm — locked layout",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning,
@@ -143,7 +200,7 @@ internal sealed class TrayAppContext : ApplicationContext
             }
         }
 
-        _switchService.SaveIconLayoutNow(overwriteLockedLayout: locked);
+        QueueAction("Save icon layout now", () => _switchService.SaveIconLayoutNow(overwriteLockedLayout: locked));
     }
 
     private void ReloadHotkeys()
@@ -164,67 +221,95 @@ internal sealed class TrayAppContext : ApplicationContext
         _notifyIcon.ShowBalloonTip(2000, "DeskRealm", "Hotkeys reloaded from config.", ToolTipIcon.Info);
     }
 
-    private void StartPollingIfNeeded()
+    private void StartMonitoringIfNeeded()
     {
-        if (_pollingStarted)
+        if (_monitoringStarted)
         {
             return;
         }
 
-        _pollingStarted = true;
-        _timer.Start();
-        SafeTick();
+        _desktopChanges.Start();
+        _monitoringStarted = true;
+        QueueReconcile("monitor-start");
     }
 
-    private void SafeTick()
+    private void QueueAction(string name, Action action)
+    {
+        _ = RunSerializedAsync(name, action, showDialogOnError: true);
+    }
+
+    private void QueueActionWithCompletion(string name, Action action, Action<Exception?> completed)
+    {
+        _ = RunSerializedAsync(name, action, showDialogOnError: true, completed: completed);
+    }
+
+    private async Task RunSerializedAsync(
+        string name,
+        Action action,
+        bool showDialogOnError,
+        Action<Exception?>? completed = null)
     {
         try
         {
-            _switchService.Tick();
-            _mainForm?.RefreshStatus();
+            await _operationGate.WaitAsync(_shutdown.Token);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException)
         {
-            _logger.Error("Tick failed", ex);
-            _timer.Stop();
-            _notifyIcon.ShowBalloonTip(
-                5000,
-                "DeskRealm — strict error",
-                ex.Message,
-                ToolTipIcon.Error);
+            return;
         }
-    }
 
-    private void SafeAction(string name, Action action)
-    {
         try
         {
-            action();
-            _mainForm?.RefreshAll();
+            var stopwatch = Stopwatch.StartNew();
+            await Task.Run(action, _shutdown.Token);
+            stopwatch.Stop();
+            _logger.Info($"[PERF] serialized operation complete: name={name}, elapsed={stopwatch.Elapsed.TotalMilliseconds:0.0} ms.");
+            PostToUi(() =>
+            {
+                if (_mainForm is { IsDisposed: false, Visible: true })
+                {
+                    _mainForm.RefreshAll();
+                }
+
+                completed?.Invoke(null);
+            });
+        }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+        {
+            // Application shutdown.
         }
         catch (Exception ex)
         {
             _logger.Error($"Action failed: {name}", ex);
-            MessageBox.Show(ex.Message, "DeskRealm — error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            PostToUi(() =>
+            {
+                _notifyIcon.ShowBalloonTip(5000, "DeskRealm — strict error", ex.Message, ToolTipIcon.Error);
+                if (showDialogOnError)
+                {
+                    MessageBox.Show(ex.Message, "DeskRealm — error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+
+                completed?.Invoke(ex);
+            });
+        }
+        finally
+        {
+            _operationGate.Release();
         }
     }
 
     private void TogglePause()
     {
-        SafeAction("Toggle pause", () =>
+        QueueAction("Toggle pause", () =>
         {
             var next = !_switchService.Config.Enabled;
             _switchService.SetEnabled(next);
-            if (next && !_timer.Enabled)
-            {
-                _timer.Start();
-            }
         });
     }
 
     private void ToggleStartup(ToolStripMenuItem item)
     {
-        SafeAction("Toggle startup", () =>
+        SafeUiAction("Toggle startup", () =>
         {
             var next = !_startupService.IsEnabledForCurrentExecutable();
             if (next)
@@ -275,12 +360,45 @@ internal sealed class TrayAppContext : ApplicationContext
             _startupService,
             ReloadHotkeys,
             ExitThread,
-            StartPollingIfNeeded,
+            StartMonitoringIfNeeded,
+            QueueActionWithCompletion,
             _logger);
 
         _mainForm.ShowFirstRunPanel(firstRun && _switchService.ShouldOfferInitialDesktopImport());
+        _mainForm.RefreshAll();
         _mainForm.Show();
         _mainForm.Activate();
+    }
+
+    private void SafeUiAction(string name, Action action)
+    {
+        try
+        {
+            action();
+            _mainForm?.RefreshAll();
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"UI action failed: {name}", ex);
+            MessageBox.Show(ex.Message, "DeskRealm — error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void PostToUi(Action action)
+    {
+        if (_uiDispatcher.IsDisposed || !_uiDispatcher.IsHandleCreated)
+        {
+            return;
+        }
+
+        try
+        {
+            _uiDispatcher.BeginInvoke(action);
+        }
+        catch (InvalidOperationException)
+        {
+            // UI teardown already started.
+        }
     }
 
     private static void OpenPath(string path)
@@ -302,15 +420,37 @@ internal sealed class TrayAppContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
-        _timer.Stop();
+        _shutdown.Cancel();
+        SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+        _desktopChanges.Changed -= OnDesktopRegistryChanged;
+        _desktopChanges.Faulted -= OnDesktopMonitorFaulted;
+        _desktopChanges.Dispose();
         _hotkeys.DesktopHotkeyPressed -= OnDesktopHotkeyPressed;
         _hotkeys.Dispose();
 
+        var operationGateAcquired = false;
         try
         {
-            if (_switchService.Config.RestoreDesktopOnExit)
+            var shutdownGuardrailMs = Math.Max(3000, _switchService.Config.IconLayoutWorkerTimeoutMs + 1500);
+            if (_operationGate.Wait(shutdownGuardrailMs))
             {
-                _switchService.RestoreOriginalDesktop();
+                operationGateAcquired = true;
+                try
+                {
+                    if (_switchService.Config.RestoreDesktopOnExit)
+                    {
+                        _switchService.RestoreOriginalDesktop();
+                    }
+                }
+                finally
+                {
+                    _operationGate.Release();
+                    operationGateAcquired = false;
+                }
+            }
+            else
+            {
+                throw new TimeoutException("A DeskRealm operation was still active during the strict shutdown guardrail.");
             }
         }
         catch (Exception ex)
@@ -323,11 +463,27 @@ internal sealed class TrayAppContext : ApplicationContext
                 MessageBoxIcon.Error);
         }
 
+        var operationIdle = _operationGate.CurrentCount == 1;
+        if (operationIdle)
+        {
+            _iconWorker.Dispose();
+        }
+        else
+        {
+            _logger.Warn("DeskRealm is exiting while a serialized operation is still active; synchronization objects are intentionally left undisposed until process termination.");
+        }
+
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         _appIcon.Dispose();
         _mainForm?.PrepareForApplicationExit();
         _mainForm?.Dispose();
+        _uiDispatcher.Dispose();
+        if (!operationGateAcquired && operationIdle)
+        {
+            _operationGate.Dispose();
+            _shutdown.Dispose();
+        }
         base.ExitThreadCore();
     }
 }

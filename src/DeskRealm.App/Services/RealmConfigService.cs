@@ -54,51 +54,21 @@ internal sealed class RealmConfigService
 
         if (config.Version < 2)
         {
-            if (config.IconLayoutAutoSaveEnabled)
-            {
-                config.IconLayoutAutoSaveEnabled = false;
-                _logger.Warn("Config migration v2: iconLayoutAutoSaveEnabled disabled to remove periodic Shell polling.");
-            }
-
-            if (config.IconLayoutAutoSaveIntervalMs < 60000)
-            {
-                config.IconLayoutAutoSaveIntervalMs = 60000;
-            }
-
             config.Version = 2;
+            _logger.Warn("Config migration v2: legacy periodic icon polling settings retired.");
         }
 
         if (config.Version < 3)
         {
             config.IconLayoutDisplayTopologyGuardEnabled = true;
-            if (config.IconLayoutDisplayTopologySettleDelayMs < 1200)
-            {
-                config.IconLayoutDisplayTopologySettleDelayMs = 1200;
-            }
-
             config.Version = 3;
             _logger.Warn("Config migration v3: display topology/DPI guard enabled to prevent contaminated saves across monitors/resolution/scale.");
         }
 
         if (config.Version < 4)
         {
-            if (config.IconLayoutSwitchRestoreDelayMs < 1400)
-            {
-                config.IconLayoutSwitchRestoreDelayMs = 1400;
-            }
-
-            if (config.IconLayoutRestoreRetryCount < 2)
-            {
-                config.IconLayoutRestoreRetryCount = 2;
-            }
-
-            if (config.IconLayoutRestoreRetryDelayMs < 450)
-            {
-                config.IconLayoutRestoreRetryDelayMs = 450;
-            }
-
             config.Version = 4;
-            _logger.Warn("Config migration v4: icon layout restore deferred after switch to let Explorer finish displaying the target realm.");
+            _logger.Warn("Config migration v4: legacy delayed icon restore settings detected. They are superseded by the v0.6 adaptive readiness pipeline.");
         }
 
         if (config.Version < 5)
@@ -157,14 +127,21 @@ internal sealed class RealmConfigService
             _logger.Warn("Config migration v10: icon layout variant locks added. Variant rows are keyed by virtual desktop GUID + display topology key.");
         }
 
+        if (config.Version < 11)
+        {
+            config.ShellViewReadyTimeoutMs = 2500;
+            config.IconLayoutRestoreVerificationTimeoutMs = 1400;
+            config.HotkeyModifierReleaseTimeoutMs = 1200;
+            config.DesktopStepConfirmationTimeoutMs = 1800;
+            config.Version = 11;
+            _logger.Warn(
+                "Config migration v11: fixed switch/restore delays were retired. " +
+                "DeskRealm now uses registry notifications, modifier release checks, per-step GUID confirmation and adaptive Shell verification.");
+        }
+
         config.LockedIconLayouts = NormalizeLockDictionary(config.LockedIconLayouts);
         config.LockedRealms = NormalizeLockDictionary(config.LockedRealms);
         config.LockedIconLayoutVariants = NormalizeLockDictionary(config.LockedIconLayoutVariants);
-
-        if (config.PollIntervalMs < 250)
-        {
-            throw new InvalidOperationException("pollIntervalMs is too low. Strict minimum value: 250 ms.");
-        }
 
         if (config.NextRealmNumber < 1)
         {
@@ -176,49 +153,29 @@ internal sealed class RealmConfigService
             throw new InvalidOperationException("realmNameMaxLength invalid. Strict allowed value: 16 to 120 characters.");
         }
 
-        if (config.IconLayoutSettleDelayMs is < 0 or > 5000)
-        {
-            throw new InvalidOperationException("iconLayoutSettleDelayMs invalid. Strict allowed value: 0 to 5000 ms.");
-        }
-
         if (config.IconLayoutWorkerTimeoutMs is < 1000 or > 60000)
         {
             throw new InvalidOperationException("iconLayoutWorkerTimeoutMs invalid. Strict allowed value: 1000 to 60000 ms.");
         }
 
-        if (config.IconLayoutDisplayTopologySettleDelayMs is < 0 or > 10000)
+        if (config.ShellViewReadyTimeoutMs is < 250 or > 15000)
         {
-            throw new InvalidOperationException("iconLayoutDisplayTopologySettleDelayMs invalid. Strict allowed value: 0 to 10000 ms.");
+            throw new InvalidOperationException("shellViewReadyTimeoutMs invalid. Strict allowed value: 250 to 15000 ms.");
         }
 
-        if (config.IconLayoutSwitchRestoreDelayMs is < 0 or > 10000)
+        if (config.IconLayoutRestoreVerificationTimeoutMs is < 250 or > 10000)
         {
-            throw new InvalidOperationException("iconLayoutSwitchRestoreDelayMs invalid. Strict allowed value: 0 to 10000 ms.");
+            throw new InvalidOperationException("iconLayoutRestoreVerificationTimeoutMs invalid. Strict allowed value: 250 to 10000 ms.");
         }
 
-        if (config.IconLayoutRestoreRetryCount is < 1 or > 5)
+        if (config.HotkeyModifierReleaseTimeoutMs is < 100 or > 5000)
         {
-            throw new InvalidOperationException("iconLayoutRestoreRetryCount invalid. Strict allowed value: 1 to 5.");
+            throw new InvalidOperationException("hotkeyModifierReleaseTimeoutMs invalid. Strict allowed value: 100 to 5000 ms.");
         }
 
-        if (config.IconLayoutRestoreRetryDelayMs is < 0 or > 5000)
+        if (config.DesktopStepConfirmationTimeoutMs is < 250 or > 10000)
         {
-            throw new InvalidOperationException("iconLayoutRestoreRetryDelayMs invalid. Strict allowed value: 0 to 5000 ms.");
-        }
-
-        if (config.IconLayoutAutoSaveIntervalMs is < 0 or > 300000)
-        {
-            throw new InvalidOperationException("iconLayoutAutoSaveIntervalMs invalid. Strict allowed value: 0 to 300000 ms.");
-        }
-
-        if (config.HotkeySwitchStepDelayMs is < 50 or > 1500)
-        {
-            throw new InvalidOperationException("hotkeySwitchStepDelayMs invalid. Strict allowed value: 50 to 1500 ms.");
-        }
-
-        if (config.HotkeySwitchSettleTimeoutMs is < 500 or > 15000)
-        {
-            throw new InvalidOperationException("hotkeySwitchSettleTimeoutMs invalid. Strict allowed value: 500 to 15000 ms.");
+            throw new InvalidOperationException("desktopStepConfirmationTimeoutMs invalid. Strict allowed value: 250 to 10000 ms.");
         }
 
         if (config.DesktopHotkeysEnabled)

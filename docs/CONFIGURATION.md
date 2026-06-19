@@ -1,185 +1,52 @@
-# Configuration
+# DeskRealm configuration — v0.6.0
 
-DeskRealm stores its user configuration locally at:
+Config path:
 
 ```text
 %APPDATA%\DeskRealm\deskrealm.config.json
 ```
 
-Current config version: `10`.
+## Schema version 11
 
-## Core fields
+The migration preserves assignments, first-run decisions, direct hotkeys, startup preference and all lock dictionaries. Fixed polling/settle/retry settings from older schemas are retired.
 
-| Field | Purpose |
-|---|---|
-| `version` | Config schema version. Current value: `10`. |
-| `enabled` | Enables realm switching automation. When `false`, automatic switching and DeskRealm desktop hotkeys are paused. |
-| `pollIntervalMs` | Watch-loop interval. Strict minimum: `250`. |
-| `restoreDesktopOnExit` | Restores `originalDesktopPath` when DeskRealm exits. |
-| `rejectOneDriveDesktop` | Refuses OneDrive Desktop paths by default. |
-| `syncRealmNamesWithVirtualDesktopNames` | Keeps realm folder names aligned with Windows virtual desktop names. |
-| `originalDesktopPath` | The Desktop path captured when the config was created. |
-| `realmsRoot` | Root folder that contains managed realm folders. |
-| `assignments` | Maps virtual desktop GUIDs to managed realm folders or explicit absolute paths. |
+### Performance guardrails
 
-## First-run onboarding fields
+| Field | Default | Valid range | Purpose |
+|---|---:|---:|---|
+| `iconLayoutWorkerTimeoutMs` | 8000 | 1000–60000 | Maximum duration of one worker command |
+| `shellViewReadyTimeoutMs` | 2500 | 250–15000 | Maximum wait for exact target realm membership |
+| `iconLayoutRestoreVerificationTimeoutMs` | 1400 | 250–10000 | Maximum position verification window |
+| `hotkeyModifierReleaseTimeoutMs` | 1200 | 100–5000 | Maximum wait for physical Win/Ctrl/Shift/Alt release |
+| `desktopStepConfirmationTimeoutMs` | 1800 | 250–10000 | Maximum confirmation time for one desktop GUID step |
 
-| Field | Purpose |
-|---|---|
-| `initialDesktopImportPromptEnabled` | Allows the first-run onboarding UI on fresh configs. |
-| `initialDesktopImportPromptCompleted` | Prevents onboarding from repeating once the user has decided. |
-| `initialDesktopImportMoveFiles` | Legacy safety flag. Since `v0.5.8`, this remains `false`; onboarding does not move Desktop files. |
-| `initialDesktopImportSaveLayout` | Saves the currently visible icon positions when the original Desktop is associated with a realm. |
+These are failure guardrails, not mandatory sleeps. DeskRealm proceeds as soon as the required state is observed.
 
-On fresh `v0.5.9` configs, DeskRealm opens the main UI before the first automatic Desktop switch. The user can associate the original Desktop path with one realm or skip association and create shortcuts back to the original Desktop.
-
-## Hotkeys
-
-```json
-"desktopHotkeysEnabled": true,
-"desktopHotkeys": {
-  "1": "Win+Shift+X",
-  "2": "Win+Shift+C",
-  "3": "Win+Shift+B",
-  "4": "Win+Shift+N"
-}
-```
-
-The `v0.5.9` defaults intentionally avoid `Win+Shift+W` and `Win+Shift+V`. Existing customized hotkeys are preserved during migration; only untouched legacy defaults are replaced.
-
-The UI hotkey editor is capture-based:
-
-1. click a hotkey field;
-2. hold one or two modifier keys: `Win`, `Ctrl`, `Alt`, `Shift`;
-3. press one main key;
-4. click **Save + reload** to persist and re-register the global hotkeys.
-
-Capture stops as soon as the first non-modifier key is pressed. If the user releases all modifiers before pressing a main key, capture is cancelled and the previous value is restored.
-
-Hotkeys must contain one or two modifiers plus one main key. Duplicate shortcuts are rejected explicitly after normalization.
-
-## Realm switching automation pause
-
-`enabled=false` means DeskRealm realm switching automation is paused.
-
-While paused:
-
-- the watch loop does not change the Desktop Known Folder;
-- DeskRealm desktop hotkeys are ignored;
-- manual refresh/switch actions refuse to change realms and show an explicit paused message;
-- assignments, realm folders, layouts, files and icons remain untouched.
-
-## Icon layout persistence
-
-| Field | Purpose |
-|---|---|
-| `iconLayoutPersistenceEnabled` | Enables save/restore of Desktop icon positions. |
-| `iconLayoutSettleDelayMs` | Delay before layout capture/restore actions. |
-| `iconLayoutAutoSaveEnabled` | Background autosave toggle. Default remains `false`. |
-| `iconLayoutAutoSaveIntervalMs` | Interval used when autosave is enabled. |
-| `iconLayoutWorkerTimeoutMs` | Timeout for the isolated icon-layout worker. |
-| `iconLayoutDisplayTopologyGuardEnabled` | Prevents saves while monitor/resolution/DPI topology is changing. |
-| `iconLayoutDisplayTopologySettleDelayMs` | Delay used while display topology settles. |
-| `iconLayoutSwitchRestoreDelayMs` | Delay after realm switch before restore. |
-| `iconLayoutRestoreRetryCount` | Number of restore retries. |
-| `iconLayoutRestoreRetryDelayMs` | Delay between restore retries. |
-
-Icon layout files are stored at:
-
-```text
-%APPDATA%\DeskRealm\icon-layouts\<virtual-desktop-guid>.json
-```
-
-Each layout file can contain multiple `variants`, one per display topology. The **Icon Layout** UI reads those variants and shows them as child rows. Variant rows display per-monitor working areas from persisted `DisplayX.workingWidth` / `DisplayX.workingHeight` metadata and mark the primary display with `✅`.
-
-## Locks
-
-### `lockedIconLayouts`
-
-Desktop-wide layout locks keyed by virtual desktop GUID:
-
-```json
-"lockedIconLayouts": {
-  "{00000000-0000-0000-0000-000000000000}": true
-}
-```
-
-### `lockedRealms`
-
-Realm-wide locks keyed by normalized realm path:
-
-```json
-"lockedRealms": {
-  "C:\\USERS\\YOU\\DESKTOP\\DESKREALM\\PERSONAL": true
-}
-```
-
-A realm lock protects every layout variant assigned to that realm. Child rows are disabled in the UI while the parent realm is locked.
-
-### `lockedIconLayoutVariants`
-
-Variant locks keyed by virtual desktop GUID plus display-topology key:
-
-```json
-"lockedIconLayoutVariants": {
-  "{00000000-0000-0000-0000-000000000000}|display-topology-key": true
-}
-```
-
-When the current layout/realm/variant is locked, automatic saves use merge-only-new-icons behavior. Existing protected positions are not overwritten; newly detected icons can be appended once.
-
-A full overwrite of a locked layout is possible only after explicit confirmation from the UI or tray manual save path.
-
-## Variant deletion
-
-The **Icon Layout** tab can delete a saved display-topology variant after confirmation. This removes only the selected variant entry from `%APPDATA%\DeskRealm\icon-layouts\<desktop-guid>.json`; it does not delete Desktop files or icons.
-
-If the deleted variant is present in `lockedIconLayoutVariants`, the lock entry is removed at the same time. If the last variant is deleted, the now-empty layout JSON file is removed. Config schema remains `10`.
-
-## Example
+### Example
 
 ```json
 {
-  "version": 10,
+  "version": 11,
   "enabled": true,
-  "pollIntervalMs": 750,
-  "restoreDesktopOnExit": true,
-  "rejectOneDriveDesktop": true,
+  "originalDesktopPath": "C:\\Users\\User\\Desktop",
+  "realmsRoot": "C:\\Users\\User\\Desktop\\DeskRealm",
   "syncRealmNamesWithVirtualDesktopNames": true,
-  "initialDesktopImportPromptEnabled": true,
-  "initialDesktopImportPromptCompleted": false,
-  "initialDesktopImportMoveFiles": false,
-  "initialDesktopImportSaveLayout": true,
-  "realmNameMaxLength": 80,
   "iconLayoutPersistenceEnabled": true,
-  "iconLayoutSettleDelayMs": 500,
-  "iconLayoutAutoSaveEnabled": false,
-  "iconLayoutAutoSaveIntervalMs": 60000,
   "iconLayoutWorkerTimeoutMs": 8000,
   "iconLayoutDisplayTopologyGuardEnabled": true,
-  "iconLayoutDisplayTopologySettleDelayMs": 1200,
-  "iconLayoutSwitchRestoreDelayMs": 1400,
-  "iconLayoutRestoreRetryCount": 2,
-  "iconLayoutRestoreRetryDelayMs": 450,
+  "shellViewReadyTimeoutMs": 2500,
+  "iconLayoutRestoreVerificationTimeoutMs": 1400,
   "desktopHotkeysEnabled": true,
-  "desktopHotkeys": {
-    "1": "Win+Shift+X",
-    "2": "Win+Shift+C",
-    "3": "Win+Shift+B",
-    "4": "Win+Shift+N"
-  },
+  "hotkeyModifierReleaseTimeoutMs": 1200,
+  "desktopStepConfirmationTimeoutMs": 1800,
   "lockedIconLayouts": {},
   "lockedRealms": {},
-  "lockedIconLayoutVariants": {},
-  "hotkeyInitialDelayMs": 180,
-  "hotkeySwitchStepDelayMs": 160,
-  "hotkeySwitchSettleTimeoutMs": 3000,
-  "startWithWindows": false,
-  "originalDesktopPath": "C:\\Users\\<you>\\Desktop",
-  "realmsRoot": "C:\\Users\\<you>\\Desktop\\DeskRealm",
-  "nextRealmNumber": 1,
-  "assignments": {
-    "{00000000-0000-0000-0000-000000000000}": "Personal"
-  }
+  "lockedIconLayoutVariants": {}
 }
 ```
+
+Invalid values fail explicitly during config load. DeskRealm does not silently clamp or replace them.
+
+## Layout variant persistence rule
+
+Each virtual desktop layout file can contain up to 24 exact display-topology variants. **Save icon layout now** updates only the variant matching the active `displayTopologyKey`; lock confirmation does not broaden that scope. If the active topology is new and 24 variants already exist, DeskRealm fails explicitly and requires deletion of an obsolete variant. No configuration flag can enable bulk overwrite or silent eviction.

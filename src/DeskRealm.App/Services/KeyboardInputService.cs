@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace DeskRealm.App.Services;
@@ -7,13 +8,72 @@ internal sealed class KeyboardInputService
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_KEYUP = 0x0002;
     private const ushort VK_LWIN = 0x5B;
+    private const ushort VK_SHIFT = 0x10;
     private const ushort VK_CONTROL = 0x11;
+    private const ushort VK_MENU = 0x12;
     private const ushort VK_LEFT = 0x25;
     private const ushort VK_RIGHT = 0x27;
 
     private readonly FileLogger _logger;
 
     public KeyboardInputService(FileLogger logger) => _logger = logger;
+
+    public TimeSpan WaitForNavigationModifiersReleased(int timeoutMs)
+    {
+        if (timeoutMs < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeoutMs), "Modifier release timeout must be positive.");
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var probe = 0;
+        while (AreNavigationModifiersDown())
+        {
+            if (stopwatch.ElapsedMilliseconds >= timeoutMs)
+            {
+                throw new TimeoutException(
+                    $"Hotkey modifiers were still physically pressed after {timeoutMs} ms. " +
+                    "Release Win/Ctrl/Shift/Alt before DeskRealm sends virtual desktop navigation input.");
+            }
+
+            AdaptiveWait(probe++);
+        }
+
+        stopwatch.Stop();
+        _logger.Info($"Hotkey modifiers released after {stopwatch.Elapsed.TotalMilliseconds:0.0} ms.");
+        return stopwatch.Elapsed;
+    }
+
+    private static bool AreNavigationModifiersDown()
+    {
+        return IsKeyDown(VK_LWIN) ||
+               IsKeyDown(0x5C) || // VK_RWIN
+               IsKeyDown(VK_SHIFT) ||
+               IsKeyDown(0xA0) || // VK_LSHIFT
+               IsKeyDown(0xA1) || // VK_RSHIFT
+               IsKeyDown(VK_CONTROL) ||
+               IsKeyDown(0xA2) || // VK_LCONTROL
+               IsKeyDown(0xA3) || // VK_RCONTROL
+               IsKeyDown(VK_MENU) ||
+               IsKeyDown(0xA4) || // VK_LMENU
+               IsKeyDown(0xA5);   // VK_RMENU
+    }
+
+    private static bool IsKeyDown(int virtualKey)
+    {
+        return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+    }
+
+    private static void AdaptiveWait(int probe)
+    {
+        if (probe < 4)
+        {
+            Thread.Yield();
+            return;
+        }
+
+        Thread.Sleep(Math.Min(32, 1 << Math.Min(5, probe - 4)));
+    }
 
     public void SwitchVirtualDesktopStep(int direction)
     {
@@ -41,7 +101,7 @@ internal sealed class KeyboardInputService
         if (sent != (uint)inputs.Length)
         {
             var error = Marshal.GetLastWin32Error();
-            throw new InvalidOperationException($"SendInput failed pour Win+Ctrl+{arrowName}. Sent={sent}/{inputs.Length}, Win32Error={error}, INPUT cbSize={inputSize}.");
+            throw new InvalidOperationException($"SendInput failed for Win+Ctrl+{arrowName}. Sent={sent}/{inputs.Length}, Win32Error={error}, INPUT cbSize={inputSize}.");
         }
     }
 
@@ -76,6 +136,9 @@ internal sealed class KeyboardInputService
             }
         }
     };
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);

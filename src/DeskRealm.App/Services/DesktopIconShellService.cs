@@ -7,71 +7,53 @@ namespace DeskRealm.App.Services;
 
 internal sealed class DesktopIconShellService
 {
-    private const int RestoreBatchSize = 6;
-    private const int RestoreChunkDelayMs = 45;
-    private const int RestoreVerificationDelayMs = 180;
-    private const int RestoreVerificationRetryCount = 3;
+    private const int RestoreBatchSize = 16;
     private const int RestoreVerificationTolerancePx = 4;
 
     private readonly FileLogger _logger;
 
     public DesktopIconShellService(FileLogger logger) => _logger = logger;
 
-    public IReadOnlyList<DesktopIconPosition> CapturePositions()
+    public IReadOnlyList<DesktopIconPosition> CapturePositions() => CapturePositions(transitionAware: false);
+
+    private IReadOnlyList<DesktopIconPosition> CapturePositions(bool transitionAware)
     {
         _logger.Info("Icon layout capture phase: acquire desktop IFolderView.");
-        var view = GetDesktopFolderView();
+        var view = GetDesktopFolderView(transitionAware);
         IShellFolder? folder = null;
+        var pidlsToFree = new List<IntPtr>();
 
         try
         {
-            folder = GetShellFolder(view);
-            var count = GetFolderViewItemCount(view);
-            _logger.Info($"Icon layout capture phase: visible item count = {count}.");
+            folder = GetShellFolder(view, transitionAware);
+            pidlsToFree.AddRange(EnumerateViewPidls(view, transitionAware));
+            _logger.Info($"Icon layout capture phase: visible item count = {pidlsToFree.Count}.");
 
-            var positions = new List<DesktopIconPosition>();
-            for (var index = 0; index < count; index++)
+            var positions = new List<DesktopIconPosition>(pidlsToFree.Count);
+            for (var index = 0; index < pidlsToFree.Count; index++)
             {
-                IntPtr pidl = IntPtr.Zero;
+                var pidl = pidlsToFree[index];
+                var itemKey = BuildPidlItemKey(pidl);
+                var shellDisplayName = TryGetShellDisplayName(folder, pidl, ShellConstants.SHGDN_INFOLDER);
+                var shellParsingName = TryGetShellDisplayName(folder, pidl, ShellConstants.SHGDN_FORPARSING);
+                var displayName = !string.IsNullOrWhiteSpace(shellDisplayName)
+                    ? shellDisplayName
+                    : BuildTechnicalDisplayName(index, itemKey);
+                var identityKeys = BuildIdentityKeys(itemKey, shellDisplayName, shellParsingName);
 
-                try
+                var hr = view.GetItemPosition(pidl, out var point);
+                ThrowIfFailed(hr, $"IFolderView.GetItemPosition('{displayName}')", transitionAware);
+
+                positions.Add(new DesktopIconPosition
                 {
-                    var hr = view.Item(index, out pidl);
-                    ThrowIfFailed(hr, $"IFolderView.Item({index})");
-                    if (pidl == IntPtr.Zero)
-                    {
-                        throw new InvalidOperationException($"IFolderView.Item({index}) returned an empty PIDL.");
-                    }
-
-                    var itemKey = BuildPidlItemKey(pidl);
-                    var shellDisplayName = TryGetShellDisplayName(folder, pidl, ShellConstants.SHGDN_INFOLDER);
-                    var shellParsingName = TryGetShellDisplayName(folder, pidl, ShellConstants.SHGDN_FORPARSING);
-                    var displayName = !string.IsNullOrWhiteSpace(shellDisplayName)
-                        ? shellDisplayName
-                        : BuildTechnicalDisplayName(index, itemKey);
-                    var identityKeys = BuildIdentityKeys(itemKey, shellDisplayName, shellParsingName);
-
-                    hr = view.GetItemPosition(pidl, out var point);
-                    ThrowIfFailed(hr, $"IFolderView.GetItemPosition('{displayName}')");
-
-                    positions.Add(new DesktopIconPosition
-                    {
-                        ItemKey = itemKey,
-                        DisplayName = displayName,
-                        ShellDisplayName = shellDisplayName,
-                        ShellParsingName = shellParsingName,
-                        IdentityKeys = identityKeys,
-                        X = point.X,
-                        Y = point.Y
-                    });
-                }
-                finally
-                {
-                    if (pidl != IntPtr.Zero)
-                    {
-                        Marshal.FreeCoTaskMem(pidl);
-                    }
-                }
+                    ItemKey = itemKey,
+                    DisplayName = displayName,
+                    ShellDisplayName = shellDisplayName,
+                    ShellParsingName = shellParsingName,
+                    IdentityKeys = identityKeys,
+                    X = point.X,
+                    Y = point.Y
+                });
             }
 
             ValidateNoDuplicateItemKeys(positions, "save");
@@ -80,12 +62,141 @@ internal sealed class DesktopIconShellService
         }
         finally
         {
+            foreach (var pidl in pidlsToFree)
+            {
+                Marshal.FreeCoTaskMem(pidl);
+            }
+
             ReleaseComObject(folder);
             ReleaseComObject(view);
         }
     }
 
-    public int RestorePositions(IReadOnlyList<DesktopIconPosition> savedPositions)
+    public DesktopViewProbe ProbeCurrentView(string expectedRealmPath)
+    {
+        if (string.IsNullOrWhiteSpace(expectedRealmPath))
+        {
+            throw new ArgumentException("Expected realm path is empty.", nameof(expectedRealmPath));
+        }
+
+        var normalizedRealm = NormalizePath(expectedRealmPath);
+        if (!Directory.Exists(normalizedRealm))
+        {
+            throw new DirectoryNotFoundException($"Expected realm path not found: {normalizedRealm}");
+        }
+
+        var expectedEntryNames = Directory.EnumerateFileSystemEntries(normalizedRealm)
+            .Select(path => new
+            {
+                Name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
+                Attributes = File.GetAttributes(path)
+            })
+            .Where(entry =>
+                !string.IsNullOrWhiteSpace(entry.Name) &&
+                (entry.Attributes & (FileAttributes.Hidden | FileAttributes.System)) == 0)
+            .Select(entry => entry.Name!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var positions = CapturePositions(transitionAware: true);
+        var pathBackedItems = positions
+            .Where(icon => !string.IsNullOrWhiteSpace(icon.ShellParsingName) && Path.IsPathFullyQualified(icon.ShellParsingName))
+            .ToList();
+        var commonDesktop = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+        var normalizedCommonDesktop = string.IsNullOrWhiteSpace(commonDesktop) || !Directory.Exists(commonDesktop)
+            ? null
+            : NormalizePath(commonDesktop);
+        var pathMatches = pathBackedItems.Count(icon => IsPathInsideRealm(icon.ShellParsingName, normalizedRealm));
+        var commonDesktopMatches = normalizedCommonDesktop is null
+            ? 0
+            : pathBackedItems.Count(icon => IsPathInsideRealm(icon.ShellParsingName, normalizedCommonDesktop));
+        var outsideRealmPaths = pathBackedItems.Count - pathMatches - commonDesktopMatches;
+
+        var matchedExpectedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var icon in positions)
+        {
+            foreach (var candidate in EnumerateVisibleNames(icon))
+            {
+                if (expectedEntryNames.Contains(candidate))
+                {
+                    matchedExpectedNames.Add(candidate);
+                }
+            }
+        }
+
+        var foreignPathBackedItems = pathBackedItems.Count(icon =>
+            !IsPathInsideRealm(icon.ShellParsingName, normalizedRealm) &&
+            (normalizedCommonDesktop is null || !IsPathInsideRealm(icon.ShellParsingName, normalizedCommonDesktop)));
+
+        var fingerprintSource = string.Join(
+            "\n",
+            positions
+                .Select(position => $"{position.ItemKey}|{position.ShellDisplayName}|{position.ShellParsingName}")
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase));
+        var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintSource)));
+
+        var exactRealmMembership = matchedExpectedNames.Count == expectedEntryNames.Count &&
+            pathMatches == expectedEntryNames.Count &&
+            outsideRealmPaths == 0 &&
+            foreignPathBackedItems == 0;
+
+        return new DesktopViewProbe(
+            fingerprint,
+            positions.Count,
+            expectedEntryNames.Count,
+            matchedExpectedNames.Count,
+            pathBackedItems.Count,
+            pathMatches,
+            commonDesktopMatches,
+            outsideRealmPaths,
+            foreignPathBackedItems,
+            exactRealmMembership);
+    }
+
+    private static IEnumerable<string> EnumerateVisibleNames(DesktopIconPosition icon)
+    {
+        if (!string.IsNullOrWhiteSpace(icon.ShellDisplayName))
+        {
+            yield return icon.ShellDisplayName.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(icon.DisplayName))
+        {
+            yield return icon.DisplayName.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(icon.ShellParsingName) && Path.IsPathFullyQualified(icon.ShellParsingName))
+        {
+            var fileName = Path.GetFileName(icon.ShellParsingName.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                yield return fileName;
+            }
+        }
+    }
+
+    private static bool IsPathInsideRealm(string? candidate, string realmPath)
+    {
+        if (string.IsNullOrWhiteSpace(candidate) || !Path.IsPathFullyQualified(candidate))
+        {
+            return false;
+        }
+
+        var normalizedCandidate = NormalizePath(candidate);
+        return normalizedCandidate.StartsWith(
+            realmPath + Path.DirectorySeparatorChar,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizePath(string path)
+    {
+        return Path.GetFullPath(path.Trim())
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    public int RestorePositions(
+        IReadOnlyList<DesktopIconPosition> savedPositions,
+        int verificationTimeoutMs,
+        bool transitionAware = false)
     {
         if (savedPositions.Count == 0)
         {
@@ -96,31 +207,24 @@ internal sealed class DesktopIconShellService
         ValidateLayoutHasStableKeys(savedPositions);
 
         _logger.Info("Icon layout restore phase: acquire desktop IFolderView.");
-        var view = GetDesktopFolderView();
+        var view = GetDesktopFolderView(transitionAware);
         IShellFolder? folder = null;
         var pidlsToFree = new List<IntPtr>();
 
         try
         {
-            folder = GetShellFolder(view);
-            var count = GetFolderViewItemCount(view);
-            _logger.Info($"Icon layout restore phase: visible item count = {count}.");
+            folder = GetShellFolder(view, transitionAware);
+            pidlsToFree.AddRange(EnumerateViewPidls(view, transitionAware));
+            _logger.Info($"Icon layout restore phase: visible item count = {pidlsToFree.Count}.");
 
-            var currentItems = new List<CurrentDesktopItem>();
+            var currentItems = new List<CurrentDesktopItem>(pidlsToFree.Count);
             var currentItemsByExactKey = new Dictionary<string, CurrentDesktopItem>(StringComparer.OrdinalIgnoreCase);
-            for (var index = 0; index < count; index++)
+            for (var index = 0; index < pidlsToFree.Count; index++)
             {
-                var hr = view.Item(index, out var pidl);
-                ThrowIfFailed(hr, $"IFolderView.Item({index})");
-                if (pidl == IntPtr.Zero)
-                {
-                    throw new InvalidOperationException($"IFolderView.Item({index}) returned an empty PIDL.");
-                }
-
+                var pidl = pidlsToFree[index];
                 var itemKey = BuildPidlItemKey(pidl);
                 if (currentItemsByExactKey.ContainsKey(itemKey))
                 {
-                    Marshal.FreeCoTaskMem(pidl);
                     throw new InvalidOperationException(
                         $"Ambiguous icon layout: two current Desktop items share the same PIDL key '{itemKey}'. " +
                         "DeskRealm refuses to apply an ambiguous layout.");
@@ -133,8 +237,8 @@ internal sealed class DesktopIconShellService
                     : BuildTechnicalDisplayName(index, itemKey);
                 var identityKeys = BuildIdentityKeys(itemKey, shellDisplayName, shellParsingName);
 
-                hr = view.GetItemPosition(pidl, out var currentPosition);
-                ThrowIfFailed(hr, $"IFolderView.GetItemPosition(current '{displayName}')");
+                var hr = view.GetItemPosition(pidl, out var currentPosition);
+                ThrowIfFailed(hr, $"IFolderView.GetItemPosition(current '{displayName}')", transitionAware);
 
                 var currentItem = new CurrentDesktopItem(
                     itemKey,
@@ -146,7 +250,6 @@ internal sealed class DesktopIconShellService
                     currentPosition);
                 currentItems.Add(currentItem);
                 currentItemsByExactKey.Add(itemKey, currentItem);
-                pidlsToFree.Add(pidl);
             }
 
             var missing = new List<string>();
@@ -195,8 +298,8 @@ internal sealed class DesktopIconShellService
             var unresolved = new List<RestoreTarget>();
             if (attempted > 0)
             {
-                ApplyPositionsInChunks(view, targets, "initial");
-                unresolved = VerifyAndRetryPositions(view, targets);
+                ApplyPositionsInChunks(view, targets, "initial", transitionAware);
+                unresolved = VerifyAndRetryPositions(view, targets, verificationTimeoutMs, transitionAware);
             }
 
             if (missing.Count > 0)
@@ -216,12 +319,15 @@ internal sealed class DesktopIconShellService
 
             if (unresolved.Count > 0)
             {
+                var unresolvedNames =
+                    $"{string.Join(", ", unresolved.Select(t => t.DisplayName).Take(12))}{(unresolved.Count > 12 ? ", ..." : string.Empty)}";
                 _logger.Warn(
-                    $"Icon layout restore verification still has {unresolved.Count} icon(s) not at target position after retries: " +
-                    $"{string.Join(", ", unresolved.Select(t => t.DisplayName).Take(12))}{(unresolved.Count > 12 ? ", ..." : string.Empty)}");
+                    $"Icon layout restore verification still has {unresolved.Count} icon(s) not at target position: {unresolvedNames}");
+                throw new TimeoutException(
+                    $"Icon layout verification failed for {unresolved.Count}/{attempted} visible target(s) within {verificationTimeoutMs} ms: {unresolvedNames}");
             }
 
-            var verifiedRestored = Math.Max(0, attempted - unresolved.Count);
+            var verifiedRestored = attempted;
             _logger.Info(
                 $"Icon layout restore phase: verified {verifiedRestored}/{savedPositions.Count} positions " +
                 $"(attempted={attempted}, missing={missing.Count}, fallbackMatches={fallbackMatches}, unresolved={unresolved.Count}).");
@@ -375,11 +481,11 @@ internal sealed class DesktopIconShellService
         return key.Length <= 28 ? key : key[..28] + "…";
     }
 
-    private static IShellFolder GetShellFolder(IFolderView view)
+    private static IShellFolder GetShellFolder(IFolderView view, bool transitionAware)
     {
         var shellFolderId = ShellGuids.IID_IShellFolder;
         var hr = view.GetFolder(ref shellFolderId, out var folderObject);
-        ThrowIfFailed(hr, "IFolderView.GetFolder(IShellFolder)");
+        ThrowIfFailed(hr, "IFolderView.GetFolder(IShellFolder)", transitionAware);
         return (IShellFolder)folderObject;
     }
 
@@ -408,7 +514,11 @@ internal sealed class DesktopIconShellService
         }
     }
 
-    private void ApplyPositionsInChunks(IFolderView view, IReadOnlyList<RestoreTarget> targets, string phase)
+    private void ApplyPositionsInChunks(
+        IFolderView view,
+        IReadOnlyList<RestoreTarget> targets,
+        string phase,
+        bool transitionAware)
     {
         foreach (var chunk in targets.Chunk(RestoreBatchSize))
         {
@@ -418,56 +528,87 @@ internal sealed class DesktopIconShellService
                 chunkTargets.Select(t => t.Pidl).ToArray(),
                 chunkTargets.Select(t => t.Target).ToArray(),
                 ShellConstants.SVSI_POSITIONITEM | ShellConstants.SVSI_NOTAKEFOCUS);
-            ThrowIfFailed(hr, $"IFolderView.SelectAndPositionItems({phase}, {chunkTargets.Length} icon(s))");
+            ThrowIfFailed(
+                hr,
+                $"IFolderView.SelectAndPositionItems({phase}, {chunkTargets.Length} icon(s))",
+                transitionAware);
 
-            if (RestoreChunkDelayMs > 0 && chunkTargets.Length == RestoreBatchSize)
-            {
-                Thread.Sleep(RestoreChunkDelayMs);
-            }
         }
     }
 
-    private List<RestoreTarget> VerifyAndRetryPositions(IFolderView view, IReadOnlyList<RestoreTarget> targets)
+    private List<RestoreTarget> VerifyAndRetryPositions(
+        IFolderView view,
+        IReadOnlyList<RestoreTarget> targets,
+        int verificationTimeoutMs,
+        bool transitionAware)
     {
-        var unresolved = new List<RestoreTarget>();
-        IReadOnlyList<RestoreTarget> pending = targets;
-
-        for (var attempt = 1; attempt <= RestoreVerificationRetryCount; attempt++)
+        if (verificationTimeoutMs < 1)
         {
-            if (RestoreVerificationDelayMs > 0)
-            {
-                Thread.Sleep(RestoreVerificationDelayMs);
-            }
-
-            unresolved = FindTargetsNotAtPosition(view, pending);
-            if (unresolved.Count == 0)
-            {
-                _logger.Info($"Icon layout restore verification passed on attempt {attempt}/{RestoreVerificationRetryCount}.");
-                return unresolved;
-            }
-
-            _logger.Warn(
-                $"Icon layout restore verification retry {attempt}/{RestoreVerificationRetryCount}: " +
-                $"{unresolved.Count} icon(s) not yet at target position. Re-applying only unresolved icons.");
-            ApplyPositionsInChunks(view, unresolved, $"verification-retry-{attempt}");
-            pending = unresolved;
+            throw new ArgumentOutOfRangeException(nameof(verificationTimeoutMs));
         }
 
-        if (RestoreVerificationDelayMs > 0)
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var pending = FindTargetsNotAtPosition(view, targets, transitionAware);
+        var previousCount = int.MaxValue;
+        var probe = 0;
+        var reapplyCount = 0;
+
+        while (pending.Count > 0 && stopwatch.ElapsedMilliseconds < verificationTimeoutMs)
         {
-            Thread.Sleep(RestoreVerificationDelayMs);
+            if (pending.Count >= previousCount)
+            {
+                ApplyPositionsInChunks(
+                    view,
+                    pending,
+                    $"adaptive-retry-{reapplyCount + 1}",
+                    transitionAware);
+                reapplyCount++;
+            }
+
+            previousCount = pending.Count;
+            AdaptiveWait(probe++);
+            pending = FindTargetsNotAtPosition(view, pending, transitionAware);
         }
 
-        return FindTargetsNotAtPosition(view, targets);
+        stopwatch.Stop();
+        if (pending.Count == 0)
+        {
+            _logger.Info(
+                $"Icon layout restore verification passed: elapsed={stopwatch.Elapsed.TotalMilliseconds:0.0} ms, " +
+                $"reapplyCount={reapplyCount}.");
+            return pending;
+        }
+
+        _logger.Warn(
+            $"Icon layout restore verification timeout: unresolved={pending.Count}/{targets.Count}, " +
+            $"elapsed={stopwatch.Elapsed.TotalMilliseconds:0.0} ms, reapplyCount={reapplyCount}.");
+        return FindTargetsNotAtPosition(view, targets, transitionAware);
     }
 
-    private static List<RestoreTarget> FindTargetsNotAtPosition(IFolderView view, IReadOnlyList<RestoreTarget> targets)
+    private static void AdaptiveWait(int probe)
+    {
+        if (probe < 3)
+        {
+            Thread.Yield();
+            return;
+        }
+
+        Thread.Sleep(Math.Min(64, 2 << Math.Min(5, probe - 3)));
+    }
+
+    private static List<RestoreTarget> FindTargetsNotAtPosition(
+        IFolderView view,
+        IReadOnlyList<RestoreTarget> targets,
+        bool transitionAware)
     {
         var unresolved = new List<RestoreTarget>();
         foreach (var target in targets)
         {
             var hr = view.GetItemPosition(target.Pidl, out var current);
-            ThrowIfFailed(hr, $"IFolderView.GetItemPosition(verify '{target.DisplayName}')");
+            ThrowIfFailed(
+                hr,
+                $"IFolderView.GetItemPosition(verify '{target.DisplayName}')",
+                transitionAware);
 
             if (Math.Abs(current.X - target.Target.X) > RestoreVerificationTolerancePx ||
                 Math.Abs(current.Y - target.Target.Y) > RestoreVerificationTolerancePx)
@@ -479,16 +620,58 @@ internal sealed class DesktopIconShellService
         return unresolved;
     }
 
-    private static int GetFolderViewItemCount(IFolderView view)
+    private static IReadOnlyList<IntPtr> EnumerateViewPidls(IFolderView view, bool transitionAware)
     {
-        var hr = view.ItemCount(ShellConstants.SVGIO_ALLVIEW, out var count);
-        ThrowIfFailed(hr, "IFolderView.ItemCount(SVGIO_ALLVIEW)");
-        if (count < 0)
-        {
-            throw new InvalidOperationException($"Invalid Desktop icon count: {count}.");
-        }
+        object? enumeratorObject = null;
+        var pidls = new List<IntPtr>();
 
-        return count;
+        try
+        {
+            var enumIdListId = ShellGuids.IID_IEnumIDList;
+            var hr = view.Items(
+                ShellConstants.SVGIO_ALLVIEW,
+                ref enumIdListId,
+                out var rawEnumerator);
+            enumeratorObject = rawEnumerator;
+            ThrowIfFailed(hr, "IFolderView.Items(SVGIO_ALLVIEW, IEnumIDList)", transitionAware);
+
+            if (enumeratorObject is not IEnumIDList enumerator)
+            {
+                throw new InvalidOperationException(
+                    "IFolderView.Items did not return the requested IEnumIDList interface.");
+            }
+
+            while (true)
+            {
+                hr = enumerator.Next(1, out var pidl, out var fetched);
+                if (hr == ShellConstants.S_FALSE || fetched == 0)
+                {
+                    return pidls;
+                }
+
+                ThrowIfFailed(hr, "IEnumIDList.Next", transitionAware);
+                if (fetched != 1 || pidl == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException(
+                        $"IEnumIDList.Next returned an invalid item (fetched={fetched}, pidl=0x{pidl.ToInt64():X}).");
+                }
+
+                pidls.Add(pidl);
+            }
+        }
+        catch
+        {
+            foreach (var pidl in pidls)
+            {
+                Marshal.FreeCoTaskMem(pidl);
+            }
+
+            throw;
+        }
+        finally
+        {
+            ReleaseComObject(enumeratorObject);
+        }
     }
 
     private static string BuildPidlItemKey(IntPtr pidl)
@@ -568,7 +751,7 @@ internal sealed class DesktopIconShellService
         ValidateNoDuplicateItemKeys(savedPositions, "restore");
     }
 
-    private static IFolderView GetDesktopFolderView()
+    private static IFolderView GetDesktopFolderView(bool transitionAware)
     {
         var shellWindowsType = Type.GetTypeFromCLSID(ShellGuids.CLSID_ShellWindows)
             ?? throw new InvalidOperationException("CLSID_ShellWindows not found.");
@@ -606,12 +789,15 @@ internal sealed class DesktopIconShellService
             var topLevelBrowser = ShellGuids.SID_STopLevelBrowser;
             var shellBrowserId = ShellGuids.IID_IShellBrowser;
             var hr = serviceProvider.QueryService(ref topLevelBrowser, ref shellBrowserId, out browserPtr);
-            ThrowIfFailed(hr, "IServiceProvider.QueryService(SID_STopLevelBrowser, IShellBrowser)");
+            ThrowIfFailed(
+                hr,
+                "IServiceProvider.QueryService(SID_STopLevelBrowser, IShellBrowser)",
+                transitionAware);
 
             browserObject = Marshal.GetObjectForIUnknown(browserPtr);
             var browser = (IShellBrowser)browserObject;
             hr = browser.QueryActiveShellView(out var shellView);
-            ThrowIfFailed(hr, "IShellBrowser.QueryActiveShellView");
+            ThrowIfFailed(hr, "IShellBrowser.QueryActiveShellView", transitionAware);
 
             return (IFolderView)shellView;
         }
@@ -628,8 +814,17 @@ internal sealed class DesktopIconShellService
         }
     }
 
-    private static void ThrowIfFailed(int hr, string operation)
+    private static void ThrowIfFailed(int hr, string operation, bool transitionAware = false)
     {
+        if (hr == ShellConstants.E_BOUNDS ||
+            hr == ShellConstants.E_CHANGED_STATE ||
+            (transitionAware && hr == ShellConstants.E_FAIL))
+        {
+            throw new ShellViewTransitionException(
+                $"{operation} observed a changing Shell view (HRESULT 0x{hr:X8}).",
+                Marshal.GetExceptionForHR(hr));
+        }
+
         if (hr < 0)
         {
             throw new InvalidOperationException($"{operation} failed with HRESULT 0x{hr:X8}.", Marshal.GetExceptionForHR(hr));
@@ -668,6 +863,10 @@ internal sealed class DesktopIconShellService
         public const uint SVSI_NOTAKEFOCUS = 0x40000000;
         public const uint SHGDN_INFOLDER = 0x00000001;
         public const uint SHGDN_FORPARSING = 0x00008000;
+        public const int S_FALSE = 1;
+        public const int E_FAIL = unchecked((int)0x80004005);
+        public const int E_BOUNDS = unchecked((int)0x8000000B);
+        public const int E_CHANGED_STATE = unchecked((int)0x8000000C);
     }
 
     private static class ShellGuids
@@ -676,6 +875,7 @@ internal sealed class DesktopIconShellService
         public static readonly Guid SID_STopLevelBrowser = new("4C96BE40-915C-11CF-99D3-00AA004AE837");
         public static readonly Guid IID_IShellBrowser = new("000214E2-0000-0000-C000-000000000046");
         public static readonly Guid IID_IShellFolder = new("000214E6-0000-0000-C000-000000000046");
+        public static readonly Guid IID_IEnumIDList = new("000214F2-0000-0000-C000-000000000046");
     }
 
     [StructLayout(LayoutKind.Explicit, Size = 520)]
@@ -810,6 +1010,24 @@ internal sealed class DesktopIconShellService
     }
 
     [ComImport]
+    [Guid("000214F2-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IEnumIDList
+    {
+        [PreserveSig]
+        int Next(uint celt, out IntPtr rgelt, out uint pceltFetched);
+
+        [PreserveSig]
+        int Skip(uint celt);
+
+        [PreserveSig]
+        int Reset();
+
+        [PreserveSig]
+        int Clone(out IEnumIDList ppenum);
+    }
+
+    [ComImport]
     [Guid("CDE725B0-CCC9-4519-917E-325D72FAB4CE")]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IFolderView
@@ -861,3 +1079,23 @@ internal sealed class DesktopIconShellService
             uint dwFlags);
     }
 }
+
+internal sealed class ShellViewTransitionException : Exception
+{
+    public ShellViewTransitionException(string message, Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
+
+internal sealed record DesktopViewProbe(
+    string Fingerprint,
+    int VisibleItemCount,
+    int ExpectedEntryCount,
+    int ExpectedNameMatchCount,
+    int PathBackedItemCount,
+    int PathMatchCount,
+    int CommonDesktopPathCount,
+    int OutsideRealmPathCount,
+    int ForeignPathBackedItemCount,
+    bool HasExactRealmMembership);

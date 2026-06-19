@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -11,22 +12,16 @@ internal sealed class DesktopSwitchService
     private readonly ShellRefreshService _shellRefresh;
     private readonly IconLayoutWorkerClientService _iconLayouts;
     private readonly VirtualDesktopNavigatorService _navigator;
+    private readonly KeyboardInputService _keyboard;
     private readonly FileLogger _logger;
 
     private RealmConfig? _config;
     private Guid? _lastDesktopId;
     private string _lastMessage = "Initialized.";
     private DateTimeOffset _lastSwitchAt = DateTimeOffset.MinValue;
-    private DateTimeOffset _lastIconAutoSaveAt = DateTimeOffset.MinValue;
     private string? _lastDisplayTopologyKey;
-    private DateTimeOffset _lastDisplayTopologyChangedAt = DateTimeOffset.MinValue;
     private bool _displayTopologyRestorePending;
-    private Guid? _pendingIconRestoreDesktopId;
-    private string? _pendingIconRestoreDesktopName;
-    private string? _pendingIconRestoreRealmPath;
-    private string? _pendingIconRestoreRealmName;
-    private DateTimeOffset _pendingIconRestoreReadyAt = DateTimeOffset.MinValue;
-    private string? _pendingIconRestoreReason;
+    private bool _startupRealmRestorePending = true;
     private bool _iconLayoutsDisabledForSession;
     private string? _iconLayoutsDisabledReason;
 
@@ -37,6 +32,7 @@ internal sealed class DesktopSwitchService
         ShellRefreshService shellRefresh,
         IconLayoutWorkerClientService iconLayouts,
         VirtualDesktopNavigatorService navigator,
+        KeyboardInputService keyboard,
         FileLogger logger)
     {
         _configService = configService;
@@ -45,10 +41,15 @@ internal sealed class DesktopSwitchService
         _shellRefresh = shellRefresh;
         _iconLayouts = iconLayouts;
         _navigator = navigator;
+        _keyboard = keyboard;
         _logger = logger;
     }
 
     public RealmConfig Config => _config ?? throw new InvalidOperationException("Config not initialized.");
+
+    public string IconLayoutRuntimeStatus => _iconLayoutsDisabledForSession
+        ? "DISABLED UNTIL RESTART — " + _iconLayoutsDisabledReason
+        : "Active";
 
     public void Initialize()
     {
@@ -59,7 +60,6 @@ internal sealed class DesktopSwitchService
         {
             var topology = DisplayTopologyService.Capture();
             _lastDisplayTopologyKey = topology.Key;
-            _lastDisplayTopologyChangedAt = DateTimeOffset.Now;
             _logger.Info($"Initial display topology captured: {topology.Key} ({topology.Screens.Count} screen(s), virtual={topology.VirtualBoundsWidth}x{topology.VirtualBoundsHeight}).");
         }
 
@@ -85,15 +85,15 @@ internal sealed class DesktopSwitchService
         _logger.Info($"Realms root: {Config.RealmsRoot}");
         _logger.Info($"Realm name sync: {Config.SyncRealmNamesWithVirtualDesktopNames}");
         _logger.Info($"Icon layout persistence: {Config.IconLayoutPersistenceEnabled}");
-        _logger.Info($"Icon layout background autosave: {Config.IconLayoutAutoSaveEnabled} / {Config.IconLayoutAutoSaveIntervalMs} ms");
-        if (!Config.IconLayoutAutoSaveEnabled)
-        {
-            _logger.Info("Icon layout background autosave disabled. Layouts are saved on desktop switch, manual save, and exit restore.");
-        }
+        _logger.Info("Icon layouts are saved on confirmed DeskRealm hotkey transitions, manual save, lock merge and exit restore; legacy periodic polling is retired.");
         _logger.Info($"Icon layout worker timeout: {Config.IconLayoutWorkerTimeoutMs} ms");
-        _logger.Info($"Icon layout delayed switch restore: delay={Config.IconLayoutSwitchRestoreDelayMs} ms, retries={Config.IconLayoutRestoreRetryCount}, retryDelay={Config.IconLayoutRestoreRetryDelayMs} ms");
+        _logger.Info($"Adaptive Shell readiness timeout: {Config.ShellViewReadyTimeoutMs} ms");
+        _logger.Info($"Adaptive icon verification timeout: {Config.IconLayoutRestoreVerificationTimeoutMs} ms");
+        _logger.Info("Startup layout recovery: the first matching realm is restored once even when the Desktop Known Folder already targets it.");
         _logger.Info($"Desktop hotkeys: {Config.DesktopHotkeysEnabled} / {string.Join(", ", Config.DesktopHotkeys.Select(p => $"#{p.Key}={p.Value}"))}");
-        _logger.Info($"Hotkey switch timing: initial={Config.HotkeyInitialDelayMs} ms, step={Config.HotkeySwitchStepDelayMs} ms, settle={Config.HotkeySwitchSettleTimeoutMs} ms");
+        _logger.Info(
+            $"Hotkey adaptive timing: modifierReleaseTimeout={Config.HotkeyModifierReleaseTimeoutMs} ms, " +
+            $"stepConfirmationTimeout={Config.DesktopStepConfirmationTimeoutMs} ms");
     }
 
     public void Tick()
@@ -118,8 +118,7 @@ internal sealed class DesktopSwitchService
             _lastDesktopId.Value == current.Id &&
             string.Equals(currentKnownDesktop, realmPath, StringComparison.OrdinalIgnoreCase))
         {
-            RestoreIconLayoutAfterDisplayTopologySettled(current, realmPath);
-            TryRestorePendingIconLayout(current, realmPath, currentKnownDesktop, "stable-tick");
+            RestoreIconLayoutAfterDisplayTopologyChange(current, realmPath);
             return;
         }
 
@@ -163,21 +162,128 @@ internal sealed class DesktopSwitchService
             return;
         }
 
-        SaveIconLayoutForKnownDesktopIfRealm(_knownFolder.GetDesktopPath());
-        _navigator.NavigateByNumber(current.Number, targetNumber, desktops.Count, Config.HotkeySwitchStepDelayMs);
+        var operation = Stopwatch.StartNew();
+        var targetRealmPath = ResolveRealmPath(target, createIfMissing: true);
+        _logger.Info(
+            $"[PERF] hotkey preflight complete: target=#{target.Number} {target.Id:B}, realm={targetRealmPath}, " +
+            $"elapsed={operation.Elapsed.TotalMilliseconds:0.0} ms.");
 
-        var switched = WaitForCurrentDesktop(target.Id, Config.HotkeySwitchSettleTimeoutMs);
-        if (switched.Id != target.Id)
+        SaveIconLayoutForKnownDesktopIfRealm(_knownFolder.GetDesktopPath(), "hotkey-pre-navigation-save");
+        _keyboard.WaitForNavigationModifiersReleased(Config.HotkeyModifierReleaseTimeoutMs);
+
+        _logger.Info(
+            $"Hotkey parallel transaction starting: source=#{current.Number} {current.Id:B}, " +
+            $"target=#{target.Number} {target.Id:B}, realm={targetRealmPath}.");
+
+        using var startGate = new ManualResetEventSlim(false);
+        var navigationTask = Task.Run(() =>
         {
-            throw new InvalidOperationException(
-                $"Windows did not confirm the switch to desktop #{targetNumber} within the expected timeout. " +
-                $"Detected current desktop: #{switched.Number} {switched.Name} {switched.Id:B}.");
+            startGate.Wait();
+            return _navigator.NavigateByNumber(
+                current,
+                target,
+                desktops,
+                Config.DesktopStepConfirmationTimeoutMs);
+        });
+        var targetPreparationTask = Task.Run(() =>
+        {
+            startGate.Wait();
+            return ApplyRealmTargetWithoutSourceSave(
+                target,
+                targetRealmPath,
+                "hotkey-parallel-target");
+        });
+
+        var parallelWatch = Stopwatch.StartNew();
+        startGate.Set();
+        try
+        {
+            Task.WhenAll(navigationTask, targetPreparationTask).GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // Both branches are bounded and Task.WhenAll observes both. The final transaction
+            // barrier below inspects each result and reconciles the Windows state explicitly.
+        }
+        parallelWatch.Stop();
+
+        var navigationError = GetTaskFailure(navigationTask);
+        var preparationError = GetTaskFailure(targetPreparationTask);
+        var preparationReady = targetPreparationTask.Status == TaskStatus.RanToCompletion && targetPreparationTask.Result;
+        var actual = _virtualDesktop.GetCurrentVirtualDesktop();
+
+        _logger.Info(
+            $"[PERF] hotkey parallel barrier reached: expected=#{target.Number} {target.Id:B}, " +
+            $"actual=#{actual.Number} {actual.Id:B}, navigationCompleted={navigationTask.Status == TaskStatus.RanToCompletion}, " +
+            $"targetPrepared={preparationReady}, elapsed={parallelWatch.Elapsed.TotalMilliseconds:0.0} ms.");
+
+        if (actual.Id == target.Id)
+        {
+            if (!preparationReady)
+            {
+                var speculativeFailure = preparationError?.Message ?? "target preparation returned a degraded result";
+                _logger.Warn(
+                    $"Hotkey target GUID was confirmed, but parallel realm preparation did not complete cleanly: {speculativeFailure}. " +
+                    "Performing one explicit final reconciliation on the confirmed target.");
+
+                preparationReady = ApplyRealmTargetWithoutSourceSave(
+                    target,
+                    targetRealmPath,
+                    "hotkey-final-target-reconcile");
+            }
+
+            CommitRealmState(target);
+            operation.Stop();
+
+            if (!preparationReady)
+            {
+                throw new InvalidOperationException(
+                    $"Windows reached desktop #{target.Number} {target.Name}, but its target realm layout could not be restored. " +
+                    $"Icon layout persistence is disabled for this session. Reason: {_iconLayoutsDisabledReason}");
+            }
+
+            if (navigationError is not null)
+            {
+                _logger.Warn(
+                    $"Hotkey navigation reported an intermediate confirmation error, but the final GUID barrier confirmed the requested target: " +
+                    navigationError.Message);
+            }
+
+            _lastMessage = $"Hotkey -> desktop #{targetNumber} {target.Name}.";
+            _logger.Info(_lastMessage);
+            _logger.Info(
+                $"[PERF] hotkey parallel switch complete: target=#{targetNumber}, " +
+                $"elapsed={operation.Elapsed.TotalMilliseconds:0.0} ms.");
+            return;
         }
 
-        var realmPath = ResolveRealmPath(switched, createIfMissing: true);
-        SwitchTo(switched, realmPath, force: true);
-        _lastMessage = $"Hotkey -> desktop #{targetNumber} {switched.Name}.";
-        _logger.Info(_lastMessage);
+        var actualRealmPath = ResolveRealmPath(actual, createIfMissing: true);
+        _logger.Warn(
+            $"Hotkey navigation mismatch: expected desktop #{target.Number} {target.Id:B}, " +
+            $"but Windows confirmed #{actual.Number} {actual.Id:B}. " +
+            $"Discarding prepared target realm and compensating to {actualRealmPath}.");
+
+        var compensationReady = ApplyRealmTargetWithoutSourceSave(
+            actual,
+            actualRealmPath,
+            "hotkey-navigation-mismatch-compensation");
+        CommitRealmState(actual);
+        operation.Stop();
+        _lastMessage = compensationReady
+            ? $"Hotkey mismatch compensated to desktop #{actual.Number} {actual.Name}."
+            : $"Hotkey mismatch reached desktop #{actual.Number} {actual.Name}; realm selected but icon persistence is disabled.";
+        _logger.Warn(_lastMessage);
+
+        var navigationDetail = navigationError is null ? "no navigation exception" : navigationError.Message;
+        var preparationDetail = preparationError is null ? "target preparation completed" : preparationError.Message;
+        var compensationDetail = compensationReady
+            ? "the actual desktop realm was restored and verified"
+            : "the actual desktop folder was selected, but icon persistence is disabled for this session";
+
+        throw new InvalidOperationException(
+            $"DeskRealm hotkey transaction did not reach desktop #{target.Number} {target.Name}. " +
+            $"Windows ended on desktop #{actual.Number} {actual.Name}; {compensationDetail}. " +
+            $"Navigation: {navigationDetail}. Target preparation: {preparationDetail}.");
     }
 
     public void SyncRealmNamesNow()
@@ -414,7 +520,7 @@ internal sealed class DesktopSwitchService
         }
 
         var desktop = FindVirtualDesktopOrThrow(desktopId);
-        var persistence = new IconLayoutPersistenceService(new DesktopIconShellService(_logger), _logger);
+        var persistence = new IconLayoutPersistenceService(new DesktopIconShellService(_logger), _knownFolder, _logger);
         persistence.DeleteVariant(desktop.Id, displayTopologyKey);
 
         Config.LockedIconLayoutVariants.Remove(BuildVariantLockKey(desktop.Id, displayTopologyKey));
@@ -764,9 +870,8 @@ internal sealed class DesktopSwitchService
             _logger.Warn($"Locked icon layout manual overwrite confirmed: {realmName} {desktopId:B}.");
         }
 
-        _iconLayouts.Save(desktopId, realmName, Config.IconLayoutWorkerTimeoutMs);
-        _lastIconAutoSaveAt = DateTimeOffset.Now;
-        _lastMessage = $"Icon layout saved: {realmName}";
+        _iconLayouts.SaveCurrentVariant(desktopId, realmName, Config.IconLayoutWorkerTimeoutMs);
+        _lastMessage = $"Current icon layout variant saved: {realmName}";
         _logger.Info(_lastMessage);
     }
 
@@ -790,30 +895,24 @@ internal sealed class DesktopSwitchService
         }
 
         EnsureIconLayoutsNotDisabledForSession();
-        if (Config.IconLayoutSettleDelayMs > 0)
-        {
-            Thread.Sleep(Config.IconLayoutSettleDelayMs);
-        }
 
         var realmName = Path.GetFileName(realmPath);
-        _iconLayouts.Restore(current.Id, realmName, Config.IconLayoutWorkerTimeoutMs);
+        _iconLayouts.RestoreWhenReady(
+            current.Id,
+            realmName,
+            realmPath,
+            Config.ShellViewReadyTimeoutMs,
+            Config.IconLayoutRestoreVerificationTimeoutMs,
+            Config.IconLayoutWorkerTimeoutMs);
         _lastMessage = $"Icon layout restored: {Path.GetFileName(realmPath)}";
         _logger.Info(_lastMessage);
-    }
-
-    private void EnsureDeskRealmEnabledForOperation(string operation)
-    {
-        if (!Config.Enabled)
-        {
-            throw new InvalidOperationException($"DeskRealm is disabled. Enable realm switching automation before running: {operation}.");
-        }
     }
 
     public void SetEnabled(bool enabled)
     {
         Config.Enabled = enabled;
         _configService.Save(Config);
-        _lastMessage = enabled ? "Realm switching automation enabled." : "Realm switching automation paused.";
+        _lastMessage = enabled ? "DeskRealm enabled." : "DeskRealm paused.";
         _logger.Info(_lastMessage);
     }
 
@@ -831,13 +930,20 @@ internal sealed class DesktopSwitchService
 
         _knownFolder.SetDesktopPath(original);
         _shellRefresh.RefreshDesktop(original);
-        ClearPendingIconRestore();
         _lastDesktopId = null;
         _lastSwitchAt = DateTimeOffset.Now;
         _lastMessage = $"Original Desktop restored: {original}";
         _logger.Info(_lastMessage);
     }
 
+
+    private void EnsureDeskRealmEnabledForOperation(string operation)
+    {
+        if (!Config.Enabled)
+        {
+            throw new InvalidOperationException($"DeskRealm is disabled. Enable realm switching automation before running: {operation}.");
+        }
+    }
 
     private (VirtualDesktopInfo Desktop, string RealmPath, string RealmName) GetActiveCurrentRealmOrThrow(string operation)
     {
@@ -865,13 +971,7 @@ internal sealed class DesktopSwitchService
 
     private void SaveCurrentIconLayoutBaseline(VirtualDesktopInfo desktop, string realmName, string reason)
     {
-        if (Config.IconLayoutSettleDelayMs > 0)
-        {
-            Thread.Sleep(Config.IconLayoutSettleDelayMs);
-        }
-
         _iconLayouts.Save(desktop.Id, realmName, Config.IconLayoutWorkerTimeoutMs);
-        _lastIconAutoSaveAt = DateTimeOffset.Now;
         _logger.Info($"Icon layout baseline saved for lock ({reason}): {realmName} {desktop.Id:B}");
     }
 
@@ -958,58 +1058,113 @@ internal sealed class DesktopSwitchService
             assignments);
     }
 
-    private VirtualDesktopInfo WaitForCurrentDesktop(Guid expectedDesktopId, int timeoutMs)
+    private bool ApplyRealmTargetWithoutSourceSave(
+        VirtualDesktopInfo desktop,
+        string realmPath,
+        string reason)
     {
-        var deadline = DateTimeOffset.Now.AddMilliseconds(timeoutMs);
-        Exception? lastError = null;
+        var operation = Stopwatch.StartNew();
+        var currentKnownDesktop = _knownFolder.GetDesktopPath();
 
-        while (DateTimeOffset.Now <= deadline)
+        if (!string.Equals(currentKnownDesktop, realmPath, StringComparison.OrdinalIgnoreCase))
         {
-            try
-            {
-                var current = _virtualDesktop.GetCurrentVirtualDesktop();
-                if (current.Id == expectedDesktopId)
-                {
-                    return current;
-                }
-            }
-            catch (Exception ex)
-            {
-                lastError = ex;
-            }
-
-            Thread.Sleep(80);
+            var knownFolderWatch = Stopwatch.StartNew();
+            _knownFolder.SetDesktopPath(realmPath);
+            knownFolderWatch.Stop();
+            _logger.Info(
+                $"[PERF] known-folder switch: reason={reason}, desktop={desktop.Name}, " +
+                $"elapsed={knownFolderWatch.Elapsed.TotalMilliseconds:0.0} ms.");
+        }
+        else
+        {
+            _logger.Info(
+                $"Realm target preparation: Known Folder already points to {realmPath} ({reason}).");
         }
 
-        if (lastError is not null)
+        _shellRefresh.RefreshDesktop(realmPath);
+        var iconLayoutReady = RestoreIconLayoutForDesktop(desktop, realmPath, reason);
+        operation.Stop();
+        _logger.Info(
+            $"[PERF] realm target preparation complete: reason={reason}, desktop={desktop.Name}, " +
+            $"iconLayoutReady={iconLayoutReady}, elapsed={operation.Elapsed.TotalMilliseconds:0.0} ms.");
+        return iconLayoutReady;
+    }
+
+    private void CommitRealmState(VirtualDesktopInfo desktop)
+    {
+        _startupRealmRestorePending = false;
+        _lastDesktopId = desktop.Id;
+        _lastSwitchAt = DateTimeOffset.Now;
+    }
+
+    private static Exception? GetTaskFailure(Task task)
+    {
+        if (task.Exception is null)
         {
-            _logger.Warn($"Hotkey settle wait had registry read errors: {lastError.Message}");
+            return null;
         }
 
-        return _virtualDesktop.GetCurrentVirtualDesktop();
+        return task.Exception.Flatten().InnerExceptions.FirstOrDefault();
     }
 
     private void SwitchTo(VirtualDesktopInfo desktop, string realmPath, bool force = false)
     {
+        var operation = Stopwatch.StartNew();
         var currentKnownDesktop = _knownFolder.GetDesktopPath();
 
         if (!force && string.Equals(currentKnownDesktop, realmPath, StringComparison.OrdinalIgnoreCase))
         {
+            if (_startupRealmRestorePending)
+            {
+                var startupRestoreReady = RestoreIconLayoutForDesktop(
+                    desktop,
+                    realmPath,
+                    "startup-existing-realm");
+
+                _lastDesktopId = desktop.Id;
+                _lastSwitchAt = DateTimeOffset.Now;
+                _startupRealmRestorePending = false;
+                operation.Stop();
+                _lastMessage = startupRestoreReady
+                    ? $"Startup layout reconciled: {desktop.Name} -> {realmPath}"
+                    : $"Startup realm detected, but icon persistence was disabled: {_iconLayoutsDisabledReason}";
+                _logger.Info(_lastMessage);
+                _logger.Info(
+                    $"[PERF] startup existing-realm reconciliation complete: desktop={desktop.Name}, " +
+                    $"elapsed={operation.Elapsed.TotalMilliseconds:0.0} ms.");
+
+                if (!startupRestoreReady)
+                {
+                    throw new InvalidOperationException(
+                        "The startup realm was detected, but its icon layout could not be restored. " +
+                        "Icon layout persistence is disabled for this session. Reason: " + _iconLayoutsDisabledReason);
+                }
+
+                return;
+            }
+
             _lastDesktopId = desktop.Id;
             _lastMessage = $"Already on {desktop.Name} -> {Path.GetFileName(realmPath)}";
             return;
         }
 
         SaveIconLayoutForKnownDesktopIfRealm(currentKnownDesktop);
-
-        _knownFolder.SetDesktopPath(realmPath);
-        _shellRefresh.RefreshDesktop(realmPath);
-        ScheduleIconLayoutRestore(desktop, realmPath, "switch");
-
-        _lastDesktopId = desktop.Id;
-        _lastSwitchAt = DateTimeOffset.Now;
-        _lastMessage = $"{desktop.Name} -> {realmPath}";
+        var iconLayoutReady = ApplyRealmTargetWithoutSourceSave(desktop, realmPath, "switch");
+        CommitRealmState(desktop);
+        operation.Stop();
+        _lastMessage = iconLayoutReady
+            ? $"{desktop.Name} -> {realmPath}"
+            : $"{desktop.Name} -> {realmPath}; icon persistence disabled for this session: {_iconLayoutsDisabledReason}";
         _logger.Info(_lastMessage);
+        _logger.Info(
+            $"[PERF] realm reconciliation complete: desktop={desktop.Name}, elapsed={operation.Elapsed.TotalMilliseconds:0.0} ms.");
+
+        if (!iconLayoutReady)
+        {
+            throw new InvalidOperationException(
+                "The realm switch completed, but icon layout persistence failed and was disabled for this session. " +
+                "Restart DeskRealm after reviewing the log. Reason: " + _iconLayoutsDisabledReason);
+        }
     }
 
     private string ResolveRealmPath(VirtualDesktopInfo desktop, bool createIfMissing)
@@ -1180,7 +1335,6 @@ internal sealed class DesktopSwitchService
         if (string.IsNullOrWhiteSpace(_lastDisplayTopologyKey))
         {
             _lastDisplayTopologyKey = topology.Key;
-            _lastDisplayTopologyChangedAt = DateTimeOffset.Now;
             _logger.Info($"Display topology baseline established ({reason}): {topology.Key}.");
             return;
         }
@@ -1191,13 +1345,12 @@ internal sealed class DesktopSwitchService
         }
 
         _lastDisplayTopologyKey = topology.Key;
-        _lastDisplayTopologyChangedAt = DateTimeOffset.Now;
         _displayTopologyRestorePending = true;
         _lastMessage = "Display topology changed: icon layout restore pending.";
         _logger.Warn(
             $"Display topology changed ({reason}): {topology.Key} " +
             $"({topology.Screens.Count} screen(s), virtual={topology.VirtualBoundsWidth}x{topology.VirtualBoundsHeight}). " +
-            "Icon layout saves are guarded until settle, then current realm layout will be restored.");
+            "Icon layout saves are guarded until the current realm is restored through adaptive Shell readiness.");
     }
 
     private bool IsDisplayTopologySaveGuardActive(string reason)
@@ -1207,41 +1360,33 @@ internal sealed class DesktopSwitchService
             return false;
         }
 
-        var elapsedMs = (DateTimeOffset.Now - _lastDisplayTopologyChangedAt).TotalMilliseconds;
-        if (elapsedMs < Config.IconLayoutDisplayTopologySettleDelayMs)
-        {
-            _logger.Info(
-                $"Icon layout {reason} skipped: display topology changed {elapsedMs:0} ms ago; " +
-                $"waiting {Config.IconLayoutDisplayTopologySettleDelayMs} ms before accepting saves.");
-            return true;
-        }
-
-        if (_displayTopologyRestorePending)
-        {
-            _logger.Info($"Icon layout {reason} skipped: display topology restore is pending. Restore first to avoid saving Windows-compacted icon positions.");
-            return true;
-        }
-
-        return false;
+        _logger.Info(
+            $"Icon layout {reason} skipped: display topology restore is pending. " +
+            "Restore first to avoid saving Windows-compacted icon positions.");
+        return true;
     }
 
-    private void RestoreIconLayoutAfterDisplayTopologySettled(VirtualDesktopInfo current, string realmPath)
+    private void RestoreIconLayoutAfterDisplayTopologyChange(VirtualDesktopInfo current, string realmPath)
     {
         if (!Config.IconLayoutDisplayTopologyGuardEnabled || !_displayTopologyRestorePending)
         {
             return;
         }
 
-        var elapsedMs = (DateTimeOffset.Now - _lastDisplayTopologyChangedAt).TotalMilliseconds;
-        if (elapsedMs < Config.IconLayoutDisplayTopologySettleDelayMs)
+        _logger.Info("Display topology change confirmed. Restoring current realm layout through adaptive Shell readiness.");
+        if (RestoreIconLayoutForDesktop(current, realmPath, "display-topology-change"))
         {
-            return;
+            _displayTopologyRestorePending = false;
+            _lastMessage = "Display topology changed: icon layout restored.";
         }
-
-        _logger.Info($"Display topology settled after {elapsedMs:0} ms. Restoring current realm icon layout before any future save.");
-        RestoreIconLayoutForDesktop(current, realmPath);
-        _displayTopologyRestorePending = false;
-        _lastMessage = "Display topology stabilized: icon layout restored.";
+        else
+        {
+            _displayTopologyRestorePending = false;
+            _lastMessage = "Display topology changed: adaptive icon restore failed; icon persistence is disabled until restart.";
+            throw new InvalidOperationException(
+                "Display topology reconciliation failed. Icon layout persistence is disabled for this session; " +
+                "restart DeskRealm after reviewing the log. Reason: " + _iconLayoutsDisabledReason);
+        }
     }
 
     private void SaveIconLayoutForKnownDesktopIfRealm(string knownDesktopPath, string reason = "switch-save")
@@ -1263,11 +1408,6 @@ internal sealed class DesktopSwitchService
             return;
         }
 
-        if (IsIconLayoutSwitchRestorePending(reason))
-        {
-            return;
-        }
-
         if (!TryFindAssignmentByRealmPath(knownDesktopPath, out var desktopId, out var realmName))
         {
             _logger.Info($"Icon layout {reason} skipped: active Desktop is not an assigned DeskRealm realm ({knownDesktopPath}).");
@@ -1284,13 +1424,11 @@ internal sealed class DesktopSwitchService
             if (IsLayoutOrRealmLocked(desktopId))
             {
                 _iconLayouts.SaveLockedMergeNewIcons(desktopId, realmName, Config.IconLayoutWorkerTimeoutMs);
-                _lastIconAutoSaveAt = DateTimeOffset.Now;
                 _logger.Info($"Icon layout {reason} locked/merge checked: {realmName} {desktopId:B}");
                 return;
             }
 
             _iconLayouts.SaveIfChanged(desktopId, realmName, Config.IconLayoutWorkerTimeoutMs);
-            _lastIconAutoSaveAt = DateTimeOffset.Now;
             _logger.Info($"Icon layout {reason} checked/saved: {realmName} {desktopId:B}");
         }
         catch (Exception ex)
@@ -1329,126 +1467,37 @@ internal sealed class DesktopSwitchService
             "Wait until DeskRealm has completed the switch, then use Save icon layout now from the active realm.");
     }
 
-    private void ScheduleIconLayoutRestore(VirtualDesktopInfo desktop, string realmPath, string reason)
+    private bool RestoreIconLayoutForDesktop(VirtualDesktopInfo desktop, string realmPath, string reason = "auto-restore")
     {
         if (!Config.IconLayoutPersistenceEnabled)
         {
-            return;
-        }
-
-        var realmName = Path.GetFileName(realmPath);
-        var delayMs = Math.Max(0, Config.IconLayoutSwitchRestoreDelayMs);
-        _pendingIconRestoreDesktopId = desktop.Id;
-        _pendingIconRestoreDesktopName = desktop.Name;
-        _pendingIconRestoreRealmPath = realmPath;
-        _pendingIconRestoreRealmName = realmName;
-        _pendingIconRestoreReadyAt = DateTimeOffset.Now.AddMilliseconds(delayMs);
-        _pendingIconRestoreReason = reason;
-        _logger.Info($"Icon layout restore scheduled after switch: {realmName} {desktop.Id:B}, delay={delayMs} ms, reason={reason}.");
-    }
-
-    private bool IsIconLayoutSwitchRestorePending(string reason)
-    {
-        if (!_pendingIconRestoreDesktopId.HasValue)
-        {
-            return false;
-        }
-
-        var remainingMs = (_pendingIconRestoreReadyAt - DateTimeOffset.Now).TotalMilliseconds;
-        _logger.Info(
-            $"Icon layout {reason} skipped: switch restore pending for '{_pendingIconRestoreRealmName}' " +
-            $"{_pendingIconRestoreDesktopId.Value:B}; restore in {Math.Max(0, remainingMs):0} ms. " +
-            "Skipping save to avoid capturing transient icons from the previous realm.");
-        return true;
-    }
-
-    private void TryRestorePendingIconLayout(VirtualDesktopInfo current, string realmPath, string currentKnownDesktop, string reason)
-    {
-        if (!_pendingIconRestoreDesktopId.HasValue)
-        {
-            return;
-        }
-
-        if (current.Id != _pendingIconRestoreDesktopId.Value)
-        {
-            _logger.Info(
-                $"Pending icon restore kept waiting ({reason}): current desktop is {current.Name} {current.Id:B}, " +
-                $"expected {_pendingIconRestoreDesktopName} {_pendingIconRestoreDesktopId.Value:B}.");
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(_pendingIconRestoreRealmPath) ||
-            !PathsEqual(currentKnownDesktop, _pendingIconRestoreRealmPath) ||
-            !PathsEqual(realmPath, _pendingIconRestoreRealmPath))
-        {
-            _logger.Info(
-                $"Pending icon restore kept waiting ({reason}): Desktop known folder not settled on target realm yet. " +
-                $"Known={currentKnownDesktop}, target={_pendingIconRestoreRealmPath}.");
-            return;
-        }
-
-        var remainingMs = (_pendingIconRestoreReadyAt - DateTimeOffset.Now).TotalMilliseconds;
-        if (remainingMs > 0)
-        {
-            _logger.Info($"Pending icon restore kept waiting ({reason}): Explorer settle delay still active ({remainingMs:0} ms remaining).");
-            return;
-        }
-
-        var pendingRealmPath = _pendingIconRestoreRealmPath;
-        var pendingReason = _pendingIconRestoreReason ?? reason;
-
-        ClearPendingIconRestore();
-        RestoreIconLayoutForDesktop(current, pendingRealmPath, $"pending-{pendingReason}");
-    }
-
-    private void ClearPendingIconRestore()
-    {
-        _pendingIconRestoreDesktopId = null;
-        _pendingIconRestoreDesktopName = null;
-        _pendingIconRestoreRealmPath = null;
-        _pendingIconRestoreRealmName = null;
-        _pendingIconRestoreReadyAt = DateTimeOffset.MinValue;
-        _pendingIconRestoreReason = null;
-    }
-
-    private void RestoreIconLayoutForDesktop(VirtualDesktopInfo desktop, string realmPath, string reason = "auto-restore")
-    {
-        if (!Config.IconLayoutPersistenceEnabled)
-        {
-            return;
+            return true;
         }
 
         if (_iconLayoutsDisabledForSession)
         {
             _logger.Warn($"Icon layout {reason} skipped: feature disabled for this session. Reason: {_iconLayoutsDisabledReason}");
-            return;
-        }
-
-        if (Config.IconLayoutSettleDelayMs > 0)
-        {
-            Thread.Sleep(Config.IconLayoutSettleDelayMs);
+            return false;
         }
 
         var realmName = Path.GetFileName(realmPath);
-        var attempts = Math.Clamp(Config.IconLayoutRestoreRetryCount, 1, 5);
         try
         {
-            for (var attempt = 1; attempt <= attempts; attempt++)
-            {
-                _iconLayouts.Restore(desktop.Id, realmName, Config.IconLayoutWorkerTimeoutMs);
-                _logger.Info($"Icon layout {reason} restore attempt {attempt}/{attempts}: {realmName} {desktop.Id:B}.");
-
-                if (attempt < attempts && Config.IconLayoutRestoreRetryDelayMs > 0)
-                {
-                    Thread.Sleep(Config.IconLayoutRestoreRetryDelayMs);
-                }
-            }
-
+            _iconLayouts.RestoreWhenReady(
+                desktop.Id,
+                realmName,
+                realmPath,
+                Config.ShellViewReadyTimeoutMs,
+                Config.IconLayoutRestoreVerificationTimeoutMs,
+                Config.IconLayoutWorkerTimeoutMs);
+            _logger.Info($"Icon layout {reason} restored adaptively: {realmName} {desktop.Id:B}.");
             _displayTopologyRestorePending = false;
+            return true;
         }
         catch (Exception ex)
         {
             DisableIconLayoutsForSession(reason, ex);
+            return false;
         }
     }
 

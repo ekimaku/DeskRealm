@@ -1,83 +1,39 @@
-# GitHub release checklist
+# DeskRealm GitHub release checklist — v0.6.0
 
-## Repository setup
+## Source state
 
-- [ ] Repository is public: `ekimaku/DeskRealm`.
-- [ ] Default branch is `main`.
-- [ ] Repository description is set, for example:
+- [x] Windows Debug build/run passes on the current release package.
+- [ ] Windows self-contained Release build passes.
+- [ ] `SMOKE_TEST.md` is complete; partial local runtime validation is documented in `docs/validation/v0.6.0-release-control.md`.
+- [x] Automatic restore works on DeskRealm hotkeys in local testing.
+- [ ] Automatic restore works on native virtual desktop changes.
+- [ ] Multi-monitor variants, layout locks, realm locks and exact variant locks pass.
+- [ ] Manual save on a locked realm changes only the active topology variant; all other variants restore unchanged.
+- [ ] `VERSION.txt`, `.csproj`, `CITATION.cff`, README, CHANGELOG and release notes all say `0.6.0`.
+- [ ] No local local ZIP suffix appears in compiled/application version metadata.
+- [x] Source ZIP contains no `bin`, `obj`, `dist`, `.release-work`, `.git` directory or nested source ZIP.
 
-  ```text
-  Windows utility that gives each virtual desktop its own Desktop folder, icon layout and hotkeys.
-  ```
-
-- [ ] Topics are set:
-
-  ```text
-  windows virtual-desktops desktop-icons productivity winforms dotnet
-  ```
-
-## Before a tag
-
-- [ ] Verify `README.md` renders correctly on GitHub and shows the current version.
-- [ ] Verify `CHANGELOG.md` contains the target version section.
-- [ ] Verify `docs/release-notes/v<version>.md` exists if the workflow uses it directly.
-- [ ] Verify `LICENSE`, `NOTICE`, `CITATION.cff` and `THIRD_PARTY_NOTICES.md` are present.
-- [ ] Verify `docs/SAFETY_AND_PRIVACY.md` is linked from the README.
-- [ ] Build locally on Windows:
-
-  ```powershell
-  .\scripts\Build-Release.ps1
-  ```
-
-- [ ] Run DeskRealm manually and confirm:
-  - First-run onboarding appears before the first automatic switch on a fresh config.
-  - The UI opens from tray and hides back to tray on close.
-  - Desktop switching works.
-  - Name sync works.
-  - Icon layout save/restore works.
-  - Same icons on several realms keep separate positions.
-  - Multi-monitor / resolution / DPI variants render and restore correctly.
-  - Hotkey capture works and duplicate/invalid shortcuts are rejected explicitly.
-  - **Enable realm switching automation** pauses automatic switching and DeskRealm desktop hotkeys.
-  - Layout, realm and variant locks protect saved icon positions.
-  - Variant deletion removes only DeskRealm layout metadata.
-  - Startup toggle works.
-  - Restore original Desktop works.
-
-## Create release
-
-Preferred helper:
+## Dry run
 
 ```powershell
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.9 -DryRun
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.5.9
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.6.0 -DryRun
 ```
 
-Manual fallback:
+- [ ] Review generated notes and commands.
+- [ ] Confirm the changelog parser selects `## v0.6.0`.
+
+## Publish one consolidated release
 
 ```powershell
-git add -A
-git commit -m "Release DeskRealm v0.5.9"
-git push origin main
-git tag -a v0.5.9 -m "DeskRealm v0.5.9"
-git push origin v0.5.9
+.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.6.0
 ```
 
-The GitHub Actions workflow will build and attach:
+Expected assets:
 
-- `DeskRealm-0.5.9-win-x64-portable.zip`
-- `DeskRealm-0.5.9-win-x64-install-bundle.zip`
+- `DeskRealm-0.6.0-win-x64-portable.zip`
+- `DeskRealm-0.6.0-win-x64-install-bundle.zip`
 
-## After release
-
-- [ ] Download both release assets from GitHub.
-- [ ] Test the portable ZIP on your machine.
-- [ ] Test the install bundle on your machine.
-- [ ] Update release notes from `CHANGELOG.md` if the helper did not finish:
-
-  ```powershell
-  gh release edit v0.5.9 --repo ekimaku/DeskRealm --title "DeskRealm v0.5.9" --notes-file ".release-work\release-notes-v0.5.9-from-changelog.md"
-  ```
-
-- [ ] Add screenshots/GIFs to the README if desired.
-- [ ] Create follow-up issues for signed installer, icon-layout diagnostics panel and branding polish.
+- [ ] Download and smoke-test the published portable ZIP on Windows.
+- [ ] Verify the embedded executable/tray/window icon.
+- [ ] Verify `VERSION.txt` is included in the published payload.
+- [x] Mark `v0.6.0` as the new stable public baseline.

@@ -5,13 +5,10 @@ namespace DeskRealm.App.Services;
 internal sealed class RealmConfig
 {
     [JsonPropertyName("version")]
-    public int Version { get; set; } = 10;
+    public int Version { get; set; } = 11;
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
-
-    [JsonPropertyName("pollIntervalMs")]
-    public int PollIntervalMs { get; set; } = 750;
 
     [JsonPropertyName("restoreDesktopOnExit")]
     public bool RestoreDesktopOnExit { get; set; } = true;
@@ -41,33 +38,17 @@ internal sealed class RealmConfig
     [JsonPropertyName("iconLayoutPersistenceEnabled")]
     public bool IconLayoutPersistenceEnabled { get; set; } = true;
 
-    [JsonPropertyName("iconLayoutSettleDelayMs")]
-    public int IconLayoutSettleDelayMs { get; set; } = 500;
-
-    [JsonPropertyName("iconLayoutAutoSaveEnabled")]
-    public bool IconLayoutAutoSaveEnabled { get; set; } = false;
-
-    [JsonPropertyName("iconLayoutAutoSaveIntervalMs")]
-    public int IconLayoutAutoSaveIntervalMs { get; set; } = 60000;
-
     [JsonPropertyName("iconLayoutWorkerTimeoutMs")]
     public int IconLayoutWorkerTimeoutMs { get; set; } = 8000;
 
     [JsonPropertyName("iconLayoutDisplayTopologyGuardEnabled")]
     public bool IconLayoutDisplayTopologyGuardEnabled { get; set; } = true;
 
-    [JsonPropertyName("iconLayoutDisplayTopologySettleDelayMs")]
-    public int IconLayoutDisplayTopologySettleDelayMs { get; set; } = 1200;
+    [JsonPropertyName("shellViewReadyTimeoutMs")]
+    public int ShellViewReadyTimeoutMs { get; set; } = 2500;
 
-    [JsonPropertyName("iconLayoutSwitchRestoreDelayMs")]
-    public int IconLayoutSwitchRestoreDelayMs { get; set; } = 1400;
-
-    [JsonPropertyName("iconLayoutRestoreRetryCount")]
-    public int IconLayoutRestoreRetryCount { get; set; } = 2;
-
-    [JsonPropertyName("iconLayoutRestoreRetryDelayMs")]
-    public int IconLayoutRestoreRetryDelayMs { get; set; } = 450;
-
+    [JsonPropertyName("iconLayoutRestoreVerificationTimeoutMs")]
+    public int IconLayoutRestoreVerificationTimeoutMs { get; set; } = 1400;
 
     [JsonPropertyName("desktopHotkeysEnabled")]
     public bool DesktopHotkeysEnabled { get; set; } = true;
@@ -95,14 +76,11 @@ internal sealed class RealmConfig
         };
     }
 
-    [JsonPropertyName("hotkeyInitialDelayMs")]
-    public int HotkeyInitialDelayMs { get; set; } = 180;
+    [JsonPropertyName("hotkeyModifierReleaseTimeoutMs")]
+    public int HotkeyModifierReleaseTimeoutMs { get; set; } = 1200;
 
-    [JsonPropertyName("hotkeySwitchStepDelayMs")]
-    public int HotkeySwitchStepDelayMs { get; set; } = 160;
-
-    [JsonPropertyName("hotkeySwitchSettleTimeoutMs")]
-    public int HotkeySwitchSettleTimeoutMs { get; set; } = 3000;
+    [JsonPropertyName("desktopStepConfirmationTimeoutMs")]
+    public int DesktopStepConfirmationTimeoutMs { get; set; } = 1800;
 
     [JsonPropertyName("startWithWindows")]
     public bool StartWithWindows { get; set; } = false;

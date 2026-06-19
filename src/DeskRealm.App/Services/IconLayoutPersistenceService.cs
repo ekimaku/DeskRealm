@@ -7,6 +7,7 @@ namespace DeskRealm.App.Services;
 internal sealed class IconLayoutPersistenceService
 {
     private readonly DesktopIconShellService _desktopIcons;
+    private readonly KnownFolderService _knownFolder;
     private readonly FileLogger _logger;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -14,9 +15,13 @@ internal sealed class IconLayoutPersistenceService
         PropertyNameCaseInsensitive = true
     };
 
-    public IconLayoutPersistenceService(DesktopIconShellService desktopIcons, FileLogger logger)
+    public IconLayoutPersistenceService(
+        DesktopIconShellService desktopIcons,
+        KnownFolderService knownFolder,
+        FileLogger logger)
     {
         _desktopIcons = desktopIcons;
+        _knownFolder = knownFolder;
         _logger = logger;
         Directory.CreateDirectory(LayoutRoot);
     }
@@ -25,50 +30,22 @@ internal sealed class IconLayoutPersistenceService
 
     public void Save(Guid virtualDesktopId, string realmName)
     {
-        SaveInternal(virtualDesktopId, realmName, saveOnlyIfChanged: false);
+        SaveInternal(virtualDesktopId, realmName, saveOnlyIfChanged: false, operation: "save");
+    }
+
+    public void SaveCurrentVariant(Guid virtualDesktopId, string realmName)
+    {
+        SaveInternal(virtualDesktopId, realmName, saveOnlyIfChanged: false, operation: "manual-current-variant-save");
     }
 
     public void SaveIfChanged(Guid virtualDesktopId, string realmName)
     {
-        SaveInternal(virtualDesktopId, realmName, saveOnlyIfChanged: true);
+        SaveInternal(virtualDesktopId, realmName, saveOnlyIfChanged: true, operation: "autosave");
     }
 
     public void SaveLockedMergeNewIcons(Guid virtualDesktopId, string realmName)
     {
         SaveLockedMergeNewIconsInternal(virtualDesktopId, realmName);
-    }
-
-    public void Restore(Guid virtualDesktopId, string realmName)
-    {
-        var path = GetLayoutPath(virtualDesktopId);
-        if (!File.Exists(path))
-        {
-            _logger.Info($"Icon layout restore skipped: no saved layout for {realmName} {virtualDesktopId:B}.");
-            return;
-        }
-
-        var currentTopology = DisplayTopologyService.Capture();
-        var raw = File.ReadAllText(path);
-        var layout = JsonSerializer.Deserialize<DesktopIconLayout>(raw, _jsonOptions)
-            ?? throw new InvalidOperationException($"Unreadable icon layout: empty deserialization ({path}).");
-
-        ValidateLayoutOwner(layout, virtualDesktopId, path);
-
-        var selected = SelectVariant(layout, currentTopology);
-        if (selected.Icons.Count == 0)
-        {
-            _logger.Info($"Icon layout restore skipped: selected layout is empty for {realmName} {virtualDesktopId:B}.");
-            return;
-        }
-
-        var iconsToRestore = string.Equals(selected.MatchKind, "exact-topology", StringComparison.OrdinalIgnoreCase)
-            ? selected.Icons
-            : AdaptIconsToCurrentTopology(selected.Icons, selected.SourceTopology, currentTopology);
-
-        var restored = _desktopIcons.RestorePositions(iconsToRestore);
-        _logger.Info(
-            $"Icon layout restored: {realmName} {virtualDesktopId:B} -> {restored}/{iconsToRestore.Count} icons " +
-            $"(variant={selected.MatchKind}, topology={currentTopology.Key}, path={path})");
     }
 
     public bool DeleteVariant(Guid virtualDesktopId, string displayTopologyKey)
@@ -134,6 +111,178 @@ internal sealed class IconLayoutPersistenceService
         return true;
     }
 
+    public void RestoreWhenReady(
+        Guid virtualDesktopId,
+        string realmName,
+        string realmPath,
+        int readinessTimeoutMs,
+        int verificationTimeoutMs)
+    {
+        if (readinessTimeoutMs < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(readinessTimeoutMs));
+        }
+
+        var layoutPath = GetLayoutPath(virtualDesktopId);
+        if (!File.Exists(layoutPath))
+        {
+            _logger.Info($"Icon layout restore skipped immediately: no saved layout for {realmName} {virtualDesktopId:B}.");
+            return;
+        }
+
+        var expectedPath = NormalizePath(realmPath);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        string? previousFingerprint = null;
+        DesktopViewProbe? lastProbe = null;
+        var stableSamples = 0;
+        var probeIndex = 0;
+        var transientViewChanges = 0;
+        string? lastTransitionMessage = null;
+
+        while (stopwatch.ElapsedMilliseconds <= readinessTimeoutMs)
+        {
+            try
+            {
+                var currentKnownFolder = NormalizePath(_knownFolder.GetDesktopPath());
+                if (string.Equals(currentKnownFolder, expectedPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    lastProbe = _desktopIcons.ProbeCurrentView(expectedPath);
+                    if (lastProbe.HasExactRealmMembership)
+                    {
+                        stableSamples = string.Equals(
+                            previousFingerprint,
+                            lastProbe.Fingerprint,
+                            StringComparison.Ordinal)
+                            ? stableSamples + 1
+                            : 1;
+
+                        if (stableSamples >= 2)
+                        {
+                            var readinessElapsedMs = stopwatch.Elapsed.TotalMilliseconds;
+                            Restore(
+                                virtualDesktopId,
+                                realmName,
+                                verificationTimeoutMs,
+                                transitionAware: true);
+                            stopwatch.Stop();
+
+                            _logger.Info(
+                                $"[PERF] Shell view ready and layout restore completed: realm={realmName}, " +
+                                $"readinessElapsed={readinessElapsedMs:0.0} ms, totalElapsed={stopwatch.Elapsed.TotalMilliseconds:0.0} ms, " +
+                                $"visible={lastProbe.VisibleItemCount}, expectedEntries={lastProbe.ExpectedEntryCount}, " +
+                                $"expectedNameMatches={lastProbe.ExpectedNameMatchCount}, pathBacked={lastProbe.PathBackedItemCount}, " +
+                                $"pathMatches={lastProbe.PathMatchCount}, commonDesktopPaths={lastProbe.CommonDesktopPathCount}, " +
+                                $"outsideRealmPaths={lastProbe.OutsideRealmPathCount}, " +
+                                $"foreignPathBacked={lastProbe.ForeignPathBackedItemCount}, " +
+                                $"transientViewChanges={transientViewChanges}.");
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        stableSamples = 0;
+                    }
+
+                    previousFingerprint = lastProbe.Fingerprint;
+                }
+                else
+                {
+                    stableSamples = 0;
+                    previousFingerprint = null;
+                }
+            }
+            catch (ShellViewTransitionException ex)
+            {
+                transientViewChanges++;
+                lastTransitionMessage = ex.Message;
+                stableSamples = 0;
+                previousFingerprint = null;
+
+                if (transientViewChanges == 1 || transientViewChanges % 8 == 0)
+                {
+                    _logger.Info(
+                        $"Shell view transition observed while preparing '{realmName}' " +
+                        $"(sample={transientViewChanges}, elapsed={stopwatch.Elapsed.TotalMilliseconds:0.0} ms, " +
+                        $"reason={ex.Message}). Retrying adaptively.");
+                }
+            }
+
+            AdaptiveWait(probeIndex++);
+        }
+
+        stopwatch.Stop();
+        throw new TimeoutException(
+            $"Desktop Shell view did not become ready for '{realmName}' within {readinessTimeoutMs} ms. " +
+            $"KnownFolder='{_knownFolder.GetDesktopPath()}', expected='{expectedPath}', " +
+            $"visible={lastProbe?.VisibleItemCount.ToString() ?? "unknown"}, " +
+            $"expectedEntries={lastProbe?.ExpectedEntryCount.ToString() ?? "unknown"}, " +
+            $"expectedNameMatches={lastProbe?.ExpectedNameMatchCount.ToString() ?? "unknown"}, " +
+            $"pathBacked={lastProbe?.PathBackedItemCount.ToString() ?? "unknown"}, " +
+            $"pathMatches={lastProbe?.PathMatchCount.ToString() ?? "unknown"}, " +
+            $"commonDesktopPaths={lastProbe?.CommonDesktopPathCount.ToString() ?? "unknown"}, " +
+            $"outsideRealmPaths={lastProbe?.OutsideRealmPathCount.ToString() ?? "unknown"}, " +
+            $"foreignPathBacked={lastProbe?.ForeignPathBackedItemCount.ToString() ?? "unknown"}, " +
+            $"transientViewChanges={transientViewChanges}, " +
+            $"lastTransition='{lastTransitionMessage ?? "none"}'.");
+    }
+
+    private static string NormalizePath(string path)
+    {
+        return Path.GetFullPath(path.Trim())
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    private static void AdaptiveWait(int probe)
+    {
+        if (probe < 2)
+        {
+            Thread.Yield();
+            return;
+        }
+
+        Thread.Sleep(Math.Min(96, 2 << Math.Min(5, probe - 2)));
+    }
+
+    public void Restore(
+        Guid virtualDesktopId,
+        string realmName,
+        int verificationTimeoutMs,
+        bool transitionAware = false)
+    {
+        var path = GetLayoutPath(virtualDesktopId);
+        if (!File.Exists(path))
+        {
+            _logger.Info($"Icon layout restore skipped: no saved layout for {realmName} {virtualDesktopId:B}.");
+            return;
+        }
+
+        var currentTopology = DisplayTopologyService.Capture();
+        var raw = File.ReadAllText(path);
+        var layout = JsonSerializer.Deserialize<DesktopIconLayout>(raw, _jsonOptions)
+            ?? throw new InvalidOperationException($"Unreadable icon layout: empty deserialization ({path}).");
+
+        ValidateLayoutOwner(layout, virtualDesktopId, path);
+
+        var selected = SelectVariant(layout, currentTopology);
+        if (selected.Icons.Count == 0)
+        {
+            _logger.Info($"Icon layout restore skipped: selected layout is empty for {realmName} {virtualDesktopId:B}.");
+            return;
+        }
+
+        var iconsToRestore = string.Equals(selected.MatchKind, "exact-topology", StringComparison.OrdinalIgnoreCase)
+            ? selected.Icons
+            : AdaptIconsToCurrentTopology(selected.Icons, selected.SourceTopology, currentTopology);
+
+        var restored = _desktopIcons.RestorePositions(
+            iconsToRestore,
+            verificationTimeoutMs,
+            transitionAware);
+        _logger.Info(
+            $"Icon layout restored: {realmName} {virtualDesktopId:B} -> {restored}/{iconsToRestore.Count} icons " +
+            $"(variant={selected.MatchKind}, topology={currentTopology.Key}, path={path})");
+    }
+
     public string GetLayoutPath(Guid virtualDesktopId)
     {
         return GetLayoutPathForDesktop(virtualDesktopId);
@@ -190,16 +339,6 @@ internal sealed class IconLayoutPersistenceService
             .ToList();
     }
 
-    private static string BuildVariantSummary(DesktopIconLayoutVariant variant, int index)
-    {
-        if (variant.DisplayTopology is null)
-        {
-            return $"Variant {index} · {ShortTopologyKey(variant.DisplayTopologyKey)}";
-        }
-
-        return $"Variant {index}";
-    }
-
     private static IReadOnlyList<IconLayoutDisplayFileSnapshot> BuildVariantDisplays(DisplayTopologySnapshot? topology)
     {
         if (topology is null)
@@ -218,6 +357,27 @@ internal sealed class IconLayoutPersistenceService
             .ToList();
     }
 
+    private static string BuildVariantSummary(DesktopIconLayoutVariant variant, int index)
+    {
+        if (variant.DisplayTopology is null)
+        {
+            return $"Variant {index} · {ShortTopologyKey(variant.DisplayTopologyKey)}";
+        }
+
+        var topology = variant.DisplayTopology;
+        var scaleSummary = string.Join("/", topology.Screens
+            .Select(s => s.ScalePercent)
+            .Distinct()
+            .OrderBy(s => s)
+            .Select(s => s + "%"));
+        if (string.IsNullOrWhiteSpace(scaleSummary))
+        {
+            scaleSummary = "scale unknown";
+        }
+
+        return $"Variant {index} · {topology.Screens.Count} screen(s) · {topology.VirtualBoundsWidth}x{topology.VirtualBoundsHeight} · {scaleSummary}";
+    }
+
     private static string ShortTopologyKey(string topologyKey)
     {
         if (string.IsNullOrWhiteSpace(topologyKey))
@@ -228,7 +388,7 @@ internal sealed class IconLayoutPersistenceService
         return topologyKey.Length <= 18 ? topologyKey : topologyKey[..18] + "…";
     }
 
-    private void SaveInternal(Guid virtualDesktopId, string realmName, bool saveOnlyIfChanged)
+    private void SaveInternal(Guid virtualDesktopId, string realmName, bool saveOnlyIfChanged, string operation)
     {
         Directory.CreateDirectory(LayoutRoot);
 
@@ -259,6 +419,12 @@ internal sealed class IconLayoutPersistenceService
             Icons = icons
         };
 
+        var preservedVariants = ReplaceExactVariantPreservingOthers(
+            layout,
+            replacement,
+            operation,
+            maximumVariantCount: 24);
+
         layout.Version = 3;
         layout.VirtualDesktopId = virtualDesktopId.ToString("B");
         layout.RealmName = realmName;
@@ -267,18 +433,22 @@ internal sealed class IconLayoutPersistenceService
         layout.DisplayTopologyFamilyKey = topology.FamilyKey;
         layout.DisplayTopology = topology;
         layout.Icons = icons;
-        layout.Variants = layout.Variants
-            .Where(v => !string.Equals(v.DisplayTopologyKey, topology.Key, StringComparison.OrdinalIgnoreCase))
-            .Append(replacement)
-            .OrderByDescending(v => v.SavedAt)
-            .Take(24)
-            .ToList();
 
         var raw = JsonSerializer.Serialize(layout, _jsonOptions);
+        AssertSerializedPreservedVariantsUnchanged(
+            raw,
+            preservedVariants,
+            topology.Key,
+            operation,
+            virtualDesktopId,
+            path);
         File.WriteAllText(path, raw);
 
         var mode = saveOnlyIfChanged ? "autosaved" : "saved";
-        _logger.Info($"Icon layout {mode}: {realmName} {virtualDesktopId:B} -> {icons.Count} icons (topology={topology.Key}, variants={layout.Variants.Count}, path={path})");
+        _logger.Info(
+            $"Icon layout {mode}: {realmName} {virtualDesktopId:B} -> {icons.Count} icons " +
+            $"(operation={operation}, currentTopology={topology.Key}, preservedVariants={preservedVariants.Count}, " +
+            $"variants={layout.Variants.Count}, path={path})");
     }
 
     private void SaveLockedMergeNewIconsInternal(Guid virtualDesktopId, string realmName)
@@ -298,7 +468,7 @@ internal sealed class IconLayoutPersistenceService
 
         if (existingVariant is null || existingVariant.Icons.Count == 0)
         {
-            SaveInternal(virtualDesktopId, realmName, saveOnlyIfChanged: false);
+            SaveInternal(virtualDesktopId, realmName, saveOnlyIfChanged: false, operation: "locked-baseline-save");
             _logger.Info($"Icon layout locked baseline saved: {realmName} {virtualDesktopId:B} -> {capturedIcons.Count} icons (topology={topology.Key}, path={path})");
             return;
         }
@@ -330,6 +500,12 @@ internal sealed class IconLayoutPersistenceService
             Icons = mergedIcons
         };
 
+        var preservedVariants = ReplaceExactVariantPreservingOthers(
+            layout,
+            replacement,
+            operation: "locked-merge-new-icons",
+            maximumVariantCount: 24);
+
         layout.Version = 3;
         layout.VirtualDesktopId = virtualDesktopId.ToString("B");
         layout.RealmName = realmName;
@@ -338,19 +514,142 @@ internal sealed class IconLayoutPersistenceService
         layout.DisplayTopologyFamilyKey = topology.FamilyKey;
         layout.DisplayTopology = topology;
         layout.Icons = mergedIcons;
-        layout.Variants = layout.Variants
-            .Where(v => !string.Equals(v.DisplayTopologyKey, topology.Key, StringComparison.OrdinalIgnoreCase))
-            .Append(replacement)
-            .OrderByDescending(v => v.SavedAt)
-            .Take(24)
-            .ToList();
 
         var raw = JsonSerializer.Serialize(layout, _jsonOptions);
+        AssertSerializedPreservedVariantsUnchanged(
+            serializedLayout: raw,
+            expected: preservedVariants,
+            excludedTopologyKey: topology.Key,
+            operation: "locked-merge-new-icons",
+            virtualDesktopId: virtualDesktopId,
+            path: path);
         File.WriteAllText(path, raw);
 
         _logger.Info(
             $"Icon layout locked autosave merged new icons: {realmName} {virtualDesktopId:B} -> " +
-            $"new={newIcons.Count}, total={mergedIcons.Count}, topology={topology.Key}, variants={layout.Variants.Count}, path={path}");
+            $"new={newIcons.Count}, total={mergedIcons.Count}, topology={topology.Key}, " +
+            $"preservedVariants={preservedVariants.Count}, variants={layout.Variants.Count}, path={path}");
+    }
+
+    private IReadOnlyList<PreservedVariantFingerprint> ReplaceExactVariantPreservingOthers(
+        DesktopIconLayout layout,
+        DesktopIconLayoutVariant replacement,
+        string operation,
+        int maximumVariantCount)
+    {
+        if (string.IsNullOrWhiteSpace(replacement.DisplayTopologyKey))
+        {
+            throw new InvalidOperationException($"Cannot {operation}: current display topology key is empty.");
+        }
+
+        var matchingIndexes = layout.Variants
+            .Select((variant, index) => new { variant, index })
+            .Where(entry => string.Equals(
+                entry.variant.DisplayTopologyKey,
+                replacement.DisplayTopologyKey,
+                StringComparison.OrdinalIgnoreCase))
+            .Select(entry => entry.index)
+            .ToList();
+
+        if (matchingIndexes.Count > 1)
+        {
+            throw new InvalidOperationException(
+                $"Cannot {operation}: layout contains {matchingIndexes.Count} variants with the same topology key " +
+                $"'{replacement.DisplayTopologyKey}'. Resolve duplicate layout metadata before saving.");
+        }
+
+        var preservedBefore = CapturePreservedVariantFingerprints(layout.Variants, replacement.DisplayTopologyKey);
+        var updatedVariants = layout.Variants.ToList();
+
+        if (matchingIndexes.Count == 1)
+        {
+            updatedVariants[matchingIndexes[0]] = replacement;
+        }
+        else
+        {
+            if (updatedVariants.Count >= maximumVariantCount)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot {operation}: this layout already contains the maximum of {maximumVariantCount} display-topology variants. " +
+                    "Delete an obsolete variant explicitly before saving a new topology. No existing variant was removed.");
+            }
+
+            updatedVariants.Insert(0, replacement);
+        }
+
+        AssertPreservedVariantsUnchanged(
+            preservedBefore,
+            updatedVariants,
+            replacement.DisplayTopologyKey,
+            operation);
+
+        layout.Variants = updatedVariants;
+        return preservedBefore;
+    }
+
+    private void AssertSerializedPreservedVariantsUnchanged(
+        string serializedLayout,
+        IReadOnlyList<PreservedVariantFingerprint> expected,
+        string excludedTopologyKey,
+        string operation,
+        Guid virtualDesktopId,
+        string path)
+    {
+        var roundTrip = JsonSerializer.Deserialize<DesktopIconLayout>(serializedLayout, _jsonOptions)
+            ?? throw new InvalidOperationException(
+                $"Refusing {operation}: serialized layout validation returned an empty document. No layout file was written.");
+
+        ValidateLayoutOwner(roundTrip, virtualDesktopId, path);
+        AssertPreservedVariantsUnchanged(expected, roundTrip.Variants, excludedTopologyKey, operation);
+    }
+
+    private List<PreservedVariantFingerprint> CapturePreservedVariantFingerprints(
+        IEnumerable<DesktopIconLayoutVariant> variants,
+        string excludedTopologyKey)
+    {
+        return variants
+            .Where(variant => !string.Equals(
+                variant.DisplayTopologyKey,
+                excludedTopologyKey,
+                StringComparison.OrdinalIgnoreCase))
+            .Select(variant => new PreservedVariantFingerprint(
+                variant.DisplayTopologyKey,
+                FingerprintVariant(variant)))
+            .ToList();
+    }
+
+    private void AssertPreservedVariantsUnchanged(
+        IReadOnlyList<PreservedVariantFingerprint> expected,
+        IEnumerable<DesktopIconLayoutVariant> variants,
+        string excludedTopologyKey,
+        string operation)
+    {
+        var actual = CapturePreservedVariantFingerprints(variants, excludedTopologyKey);
+        if (actual.Count != expected.Count)
+        {
+            throw new InvalidOperationException(
+                $"Refusing {operation}: non-current variant count changed from {expected.Count} to {actual.Count}. " +
+                "No layout file was written.");
+        }
+
+        for (var index = 0; index < expected.Count; index++)
+        {
+            var before = expected[index];
+            var after = actual[index];
+            if (!string.Equals(before.TopologyKey, after.TopologyKey, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(before.ContentFingerprint, after.ContentFingerprint, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Refusing {operation}: preserved variant integrity changed at index {index} " +
+                    $"('{before.TopologyKey}' -> '{after.TopologyKey}'). No layout file was written.");
+            }
+        }
+    }
+
+    private string FingerprintVariant(DesktopIconLayoutVariant variant)
+    {
+        var json = JsonSerializer.Serialize(variant, _jsonOptions);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
     }
 
     private DesktopIconLayout LoadExistingLayout(string path, Guid virtualDesktopId, string realmName)
@@ -595,6 +894,8 @@ internal sealed class IconLayoutPersistenceService
         var bytes = Encoding.UTF8.GetBytes(builder.ToString());
         return Convert.ToHexString(SHA256.HashData(bytes));
     }
+
+    private sealed record PreservedVariantFingerprint(string TopologyKey, string ContentFingerprint);
 
     private readonly record struct SelectedIconVariant(string MatchKind, List<DesktopIconPosition> Icons, DisplayTopologySnapshot? SourceTopology);
 }
