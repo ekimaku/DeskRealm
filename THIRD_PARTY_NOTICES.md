@@ -1,31 +1,16 @@
 # Third-party notices
 
-DeskRealm currently does **not** include or redistribute third-party source code, DLLs, NuGet packages, or external binaries beyond the .NET / Windows Desktop runtime APIs used by the application.
+DeskRealm is Apache-2.0 licensed. Its self-contained WinUI 3 publish includes framework dependencies required by the application.
 
-## Referenced documentation and prior art
+## Framework dependencies
 
-The following projects/pages informed implementation choices and are credited as references. No source code from these projects is copied or bundled in DeskRealm.
+- **Microsoft.WindowsAppSDK** `2.2.0` — Windows App SDK components used by the unpackaged WinUI 3 application.
+- **CommunityToolkit.Mvvm** `8.4.2` — MVVM observable-property and command primitives used by DeskRealm view models.
 
-### Microsoft / Win32 documentation
+Before a public release, inspect the resolved Windows `dist\DeskRealm` output and package license/notice requirements. A single-file executable does not remove redistribution obligations.
 
-DeskRealm uses Windows APIs such as Known Folders, Shell folder views, global hotkeys, synthetic keyboard input, and HKCU Run startup registry entries. See `docs/REFERENCES.md`.
+## References and prior art
 
-### Raymond Chen / The Old New Thing
+DeskRealm uses Windows Known Folders, Shell folder views, global hotkeys, synthetic keyboard input, notification-area integration and HKCU Run startup. See `docs/REFERENCES.md`.
 
-DeskRealm's Desktop icon positioning approach follows the documented/supported `IFolderView` direction described by Raymond Chen, especially `IFolderView::SelectAndPositionItems`.
-
-### Gérald Barré / Meziantou
-
-The virtual desktop registry discovery approach was informed by Gérald Barré's article about listing Windows virtual desktops using .NET.
-
-### pmb6tz/windows-desktop-switcher
-
-DeskRealm's direct-numbered virtual desktop hotkey feature is related to the broader idea of keyboard-based virtual desktop switching as explored by pmb6tz/windows-desktop-switcher. DeskRealm does not copy or bundle code from that project.
-
-### Ciantic/VirtualDesktopAccessor
-
-DeskRealm intentionally does not bundle VirtualDesktopAccessor.dll, but the project is relevant prior art for Windows virtual desktop tooling.
-
-## License compatibility note
-
-Because no third-party code is bundled, there are currently no third-party license texts that must be redistributed with DeskRealm beyond DeskRealm's own Apache-2.0 license.
+The virtual-desktop registry discovery approach was informed by Gérald Barré / Meziantou. DeskRealm does not bundle VirtualDesktopAccessor or code from the other reference projects listed in `docs/REFERENCES.md`.

@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 title: "DeskRealm"
-version: "0.6.0"
+version: "0.7.0"
 message: "If you use or derive from DeskRealm, please cite this project."
 authors:
   - name: "Ayahua"
@@ -12,7 +12,7 @@ keywords:
   - virtual desktops
   - desktop icons
   - productivity
-  - WinForms
+  - WinUI 3
   - dotnet
 abstract: >
   DeskRealm is a Windows tray utility that gives each Windows virtual desktop

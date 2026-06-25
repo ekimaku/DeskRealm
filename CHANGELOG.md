@@ -1,8 +1,48 @@
 # Changelog
 
-Current public release: `v0.6.0`.
+## v0.7.0 — Realm Studio: Your Windows Workspaces, Made Visible
 
-Previous `0.5.x` builds are superseded by `v0.6.0` and are kept only as historical changelog entries.
+Released: 2026-06-25
+
+DeskRealm v0.7.0 is the Realm Studio release: a full WinUI 3 rework that turns every virtual desktop into a visible workspace card. Users can now switch realms, preview or stage wallpapers, edit hotkeys inline, control realm protection and choose their default startup workspace directly from the dashboard.
+
+### Added
+
+- Automation **Start minimized** preference: users can choose notification-area launch or an immediately visible Realm Studio window, independently from Windows Run-key startup.
+- **Realm Studio:** a WinUI 3 dashboard where every realm card is a direct control surface for wallpapers, hotkeys, protection, default startup behavior, layout variants and archive-resolution choices.
+- Explicit virtual-desktop rename application policy: ask, restart Explorer now, or apply on next reboot.
+- Tray re-registration after Explorer recreates the notification area.
+- Direct realm-card actions for wallpaper preview/draft/save, inline hotkey capture/reset/save, lock/unlock and default-realm selection — without reopening a separate settings route for each action.
+- Two-way wallpaper experience: Realm Studio imports a readable Windows per-desktop assignment when it differs from the managed preview, while a preview edit remains a draft until the user explicitly saves it.
+- Explicit in-app DeskRealm restart recovery, including `dotnet run` development-host support.
+
+### Changed
+
+- Advanced configuration to schema v18. Existing installs retain the prior notification-area launch behavior; first-run setup remains visible.
+- Realm lock glyphs now represent the current state (`🔒` locked, `🔓` unlocked), while tooltips state the explicit next action.
+- Replaced candidate-specific repair manifests and source-text preflight scripts with a conventional restore → build → publish workflow.
+- Simplified local scripts, GitHub Actions and repository documentation around a fresh-extraction workflow.
+- Completed a post-reset codebase audit: removed retired v0.6 config switches and number-based realm fallbacks, dead runtime/UI wrappers, unused layout snapshot display metadata and obsolete WinForms compile exclusions.
+- Advanced configuration to schema v16. Windows-aware GUID hotkey migration now runs before later schema migrations; the legacy `desktopHotkeys` payload is removed after successful GUID binding.
+- Moved completed development TODOs from the repository root into `docs/history/`.
+- Realm-card icon counts now describe the saved layout for the current display topology instead of the historical total across all variants.
+- Realm-card **Activate** wording is now **Switch**.
+- Advanced configuration to schema v17 and established one deterministic default-realm invariant.
+- Debounced Explorer/Registry-driven Realm Studio refreshes and prevented an active inline hotkey capture from being discarded by a card refresh.
+
+### Fixed
+
+- Fixed `Prepare-GitHubRelease.ps1` parsing in Windows PowerShell 5.1 when validating the Unicode em dash in the titled `v0.7.0` CHANGELOG header. The helper now constructs the separator at runtime and keeps executable PowerShell sources ASCII-only.
+- Polished reusable hotkey capture: the VCard editor now gives the field its full width, keeps long instructions in a tooltip, and provides a dedicated **Reset / 💾 / ×** action row.
+- Fixed inline VCard hotkey capture requiring a second pencil click. The active capture is now marked before global-hotkey suspension can schedule a dashboard refresh, so the first click renders and focuses `Waiting input...` on the live VCard.
+- Fixed a Realm Studio direct-controls compile regression: `RealmEditorModal` now receives the raw nullable realm hotkey from `RealmCardViewModel`, rather than referencing a missing member.
+- Prevented a false `snapshot failed` / `Desktop 1` duplicate-realm diagnostic after an explicit Explorer restart. DeskRealm now retains confirmed desktop labels per GUID during shell metadata rebuild and retires stale assignments from desktops removed outside the app.
+- Canonicalized persisted assignment GUID keys before runtime reconciliation so mixed GUID formatting cannot create duplicate mappings for one Windows desktop.
+- Native Desktop realm edits preserve the physical Desktop folder.
+- Unchanged realm names no longer trigger a rename mutation.
+- Live name conflicts are separated from archived realm reuse choices.
+- Realm/variant protection now reports parent inheritance explicitly and preserves individual variant lock choices when a realm lock is toggled.
+- Wallpaper preview no longer depends solely on images selected through DeskRealm.
 
 ## v0.6.0 — Adaptive performance pipeline
 

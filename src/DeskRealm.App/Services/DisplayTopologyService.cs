@@ -1,6 +1,4 @@
-using System.Drawing;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -9,33 +7,55 @@ namespace DeskRealm.App.Services;
 
 internal static class DisplayTopologyService
 {
-    private const int MONITOR_DEFAULTTONEAREST = 0x00000002;
     private const int MDT_EFFECTIVE_DPI = 0;
+    private const uint MONITORINFOF_PRIMARY = 0x00000001;
 
-    private static readonly JsonSerializerOptions StableJsonOptions = new()
-    {
-        WriteIndented = false
-    };
+    private static readonly JsonSerializerOptions StableJsonOptions = new() { WriteIndented = false };
 
     public static DisplayTopologySnapshot Capture()
     {
-        var screens = Screen.AllScreens
-            .Select(BuildScreenInfo)
-            .OrderBy(s => s.DeviceName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(s => s.BoundsX)
-            .ThenBy(s => s.BoundsY)
-            .ToList();
+        var screens = new List<DisplayScreenInfo>();
+        if (!EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (monitor, _, _, _) =>
+            {
+                var info = new MONITORINFOEXW { cbSize = Marshal.SizeOf<MONITORINFOEXW>() };
+                if (!GetMonitorInfoW(monitor, ref info))
+                {
+                    throw new InvalidOperationException($"Could not read monitor information. Win32Error={Marshal.GetLastWin32Error()}.");
+                }
 
-        if (screens.Count == 0)
+                var dpi = TryGetEffectiveDpi(monitor);
+                var bounds = info.rcMonitor;
+                var working = info.rcWork;
+                screens.Add(new DisplayScreenInfo
+                {
+                    DeviceName = info.szDevice?.TrimEnd('\0') ?? string.Empty,
+                    Primary = (info.dwFlags & MONITORINFOF_PRIMARY) != 0,
+                    BoundsX = bounds.left,
+                    BoundsY = bounds.top,
+                    BoundsWidth = bounds.right - bounds.left,
+                    BoundsHeight = bounds.bottom - bounds.top,
+                    WorkingX = working.left,
+                    WorkingY = working.top,
+                    WorkingWidth = working.right - working.left,
+                    WorkingHeight = working.bottom - working.top,
+                    EffectiveDpiX = dpi.dpiX,
+                    EffectiveDpiY = dpi.dpiY,
+                    ScalePercent = dpi.dpiX <= 0 ? 0 : (int)Math.Round(dpi.dpiX * 100.0 / 96.0),
+                    Orientation = (bounds.right - bounds.left) >= (bounds.bottom - bounds.top) ? "landscape" : "portrait"
+                });
+                return true;
+            }, IntPtr.Zero))
         {
-            throw new InvalidOperationException("Display topology unavailable: Windows did not return any active screen.");
+            throw new InvalidOperationException($"Display topology unavailable: EnumDisplayMonitors failed. Win32Error={Marshal.GetLastWin32Error()}.");
         }
+
+        screens = screens.OrderBy(s => s.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(s => s.BoundsX).ThenBy(s => s.BoundsY).ToList();
+        if (screens.Count == 0) throw new InvalidOperationException("Display topology unavailable: Windows did not return any active screen.");
 
         var minX = screens.Min(s => s.BoundsX);
         var minY = screens.Min(s => s.BoundsY);
         var maxX = screens.Max(s => s.BoundsX + s.BoundsWidth);
         var maxY = screens.Max(s => s.BoundsY + s.BoundsHeight);
-
         var snapshot = new DisplayTopologySnapshot
         {
             CapturedAt = DateTimeOffset.Now,
@@ -45,124 +65,40 @@ internal static class DisplayTopologyService
             VirtualBoundsHeight = maxY - minY,
             Screens = screens
         };
-
         snapshot.FamilyKey = BuildFamilyKey(snapshot);
         snapshot.Key = BuildExactKey(snapshot);
         return snapshot;
     }
 
-    private static DisplayScreenInfo BuildScreenInfo(Screen screen)
+    private static (int dpiX, int dpiY) TryGetEffectiveDpi(nint monitor)
     {
-        var bounds = screen.Bounds;
-        var working = screen.WorkingArea;
-        var dpi = TryGetEffectiveDpi(bounds);
-        var orientation = bounds.Width >= bounds.Height ? "landscape" : "portrait";
-
-        return new DisplayScreenInfo
-        {
-            DeviceName = screen.DeviceName,
-            Primary = screen.Primary,
-            BoundsX = bounds.X,
-            BoundsY = bounds.Y,
-            BoundsWidth = bounds.Width,
-            BoundsHeight = bounds.Height,
-            WorkingX = working.X,
-            WorkingY = working.Y,
-            WorkingWidth = working.Width,
-            WorkingHeight = working.Height,
-            EffectiveDpiX = dpi.dpiX,
-            EffectiveDpiY = dpi.dpiY,
-            ScalePercent = dpi.dpiX <= 0 ? 0 : (int)Math.Round(dpi.dpiX * 100.0 / 96.0),
-            Orientation = orientation
-        };
-    }
-
-    private static (int dpiX, int dpiY) TryGetEffectiveDpi(Rectangle bounds)
-    {
-        var center = new NativePoint(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
-        var monitor = MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST);
-        if (monitor == IntPtr.Zero)
-        {
-            return (0, 0);
-        }
-
         var hr = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, out var dpiX, out var dpiY);
-        if (hr != 0)
-        {
-            return (0, 0);
-        }
-
-        return ((int)dpiX, (int)dpiY);
+        return hr == 0 ? ((int)dpiX, (int)dpiY) : (0, 0);
     }
 
-    private static string BuildExactKey(DisplayTopologySnapshot snapshot)
+    private static string BuildExactKey(DisplayTopologySnapshot snapshot) => "display-topology-sha256:" + HashStableObject(new
     {
-        var source = new
-        {
-            snapshot.VirtualBoundsX,
-            snapshot.VirtualBoundsY,
-            snapshot.VirtualBoundsWidth,
-            snapshot.VirtualBoundsHeight,
-            Screens = snapshot.Screens.Select(s => new
-            {
-                s.DeviceName,
-                s.Primary,
-                s.BoundsX,
-                s.BoundsY,
-                s.BoundsWidth,
-                s.BoundsHeight,
-                s.WorkingX,
-                s.WorkingY,
-                s.WorkingWidth,
-                s.WorkingHeight,
-                s.EffectiveDpiX,
-                s.EffectiveDpiY,
-                s.ScalePercent,
-                s.Orientation
-            })
-        };
+        snapshot.VirtualBoundsX, snapshot.VirtualBoundsY, snapshot.VirtualBoundsWidth, snapshot.VirtualBoundsHeight,
+        Screens = snapshot.Screens.Select(s => new { s.DeviceName, s.Primary, s.BoundsX, s.BoundsY, s.BoundsWidth, s.BoundsHeight, s.WorkingX, s.WorkingY, s.WorkingWidth, s.WorkingHeight, s.EffectiveDpiX, s.EffectiveDpiY, s.ScalePercent, s.Orientation })
+    });
 
-        return "display-topology-sha256:" + HashStableObject(source);
-    }
-
-    private static string BuildFamilyKey(DisplayTopologySnapshot snapshot)
+    private static string BuildFamilyKey(DisplayTopologySnapshot snapshot) => "display-family-sha256:" + HashStableObject(new
     {
-        var source = new
-        {
-            ScreenCount = snapshot.Screens.Count,
-            Screens = snapshot.Screens.Select(s => new
-            {
-                s.DeviceName,
-                s.Primary
-            })
-        };
+        ScreenCount = snapshot.Screens.Count,
+        Screens = snapshot.Screens.Select(s => new { s.DeviceName, s.Primary })
+    });
 
-        return "display-family-sha256:" + HashStableObject(source);
-    }
+    private static string HashStableObject(object source) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(source, StableJsonOptions)))).ToLowerInvariant();
 
-    private static string HashStableObject(object source)
+    private delegate bool MonitorEnumProc(nint hMonitor, nint hdcMonitor, nint lprcMonitor, nint dwData);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool EnumDisplayMonitors(nint hdc, nint lprcClip, MonitorEnumProc callback, nint dwData);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool GetMonitorInfoW(nint hMonitor, ref MONITORINFOEXW lpmi);
+    [DllImport("shcore.dll")] private static extern int GetDpiForMonitor(nint hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
+    [StructLayout(LayoutKind.Sequential)] private struct RECT { public int left; public int top; public int right; public int bottom; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct MONITORINFOEXW
     {
-        var json = JsonSerializer.Serialize(source, StableJsonOptions);
-        var bytes = Encoding.UTF8.GetBytes(json);
-        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-    }
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr MonitorFromPoint(NativePoint pt, int dwFlags);
-
-    [DllImport("shcore.dll")]
-    private static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private readonly struct NativePoint
-    {
-        public NativePoint(int x, int y)
-        {
-            X = x;
-            Y = y;
-        }
-
-        public readonly int X;
-        public readonly int Y;
+        public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string? szDevice;
     }
 }

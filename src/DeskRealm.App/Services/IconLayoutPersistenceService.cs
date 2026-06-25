@@ -211,7 +211,7 @@ internal sealed class IconLayoutPersistenceService
         }
 
         stopwatch.Stop();
-        throw new TimeoutException(
+        throw new ShellViewReadinessTimeoutException(
             $"Desktop Shell view did not become ready for '{realmName}' within {readinessTimeoutMs} ms. " +
             $"KnownFolder='{_knownFolder.GetDesktopPath()}', expected='{expectedPath}', " +
             $"visible={lastProbe?.VisibleItemCount.ToString() ?? "unknown"}, " +
@@ -283,6 +283,35 @@ internal sealed class IconLayoutPersistenceService
             $"(variant={selected.MatchKind}, topology={currentTopology.Key}, path={path})");
     }
 
+
+    public static void CopyLayoutForDesktop(Guid sourceDesktopId, Guid targetDesktopId, string targetRealmName, bool overwriteTarget)
+    {
+        if (sourceDesktopId == Guid.Empty || targetDesktopId == Guid.Empty) throw new InvalidOperationException("Layout reuse requires both source and target Windows desktop GUIDs.");
+        var sourcePath = GetLayoutPathForDesktop(sourceDesktopId);
+        if (!File.Exists(sourcePath)) throw new FileNotFoundException("The archived realm does not have a saved icon layout to reuse.", sourcePath);
+        var targetPath = GetLayoutPathForDesktop(targetDesktopId);
+        if (File.Exists(targetPath) && !overwriteTarget)
+        {
+            throw new InvalidOperationException("The target realm already has a saved icon layout. Choose overwrite explicitly before reusing the archived layout.");
+        }
+
+        var options = new JsonSerializerOptions { WriteIndented = true, PropertyNameCaseInsensitive = true };
+        var layout = JsonSerializer.Deserialize<DesktopIconLayout>(File.ReadAllText(sourcePath), options)
+            ?? throw new InvalidOperationException($"Unreadable archived icon layout: {sourcePath}");
+        ValidateLayoutOwner(layout, sourceDesktopId, sourcePath);
+        layout.VirtualDesktopId = targetDesktopId.ToString("B");
+        layout.RealmName = targetRealmName;
+        layout.SavedAt = DateTimeOffset.Now;
+        Directory.CreateDirectory(LayoutRoot);
+        File.WriteAllText(targetPath, JsonSerializer.Serialize(layout, options));
+    }
+
+    public static void DeleteLayoutForDesktop(Guid desktopId)
+    {
+        var path = GetLayoutPathForDesktop(desktopId);
+        if (File.Exists(path)) File.Delete(path);
+    }
+
     public string GetLayoutPath(Guid virtualDesktopId)
     {
         return GetLayoutPathForDesktop(virtualDesktopId);
@@ -331,31 +360,12 @@ internal sealed class IconLayoutPersistenceService
             .OrderByDescending(v => v.SavedAt)
             .Select((variant, index) => new IconLayoutVariantFileSnapshot(
                 variant.DisplayTopologyKey,
-                string.IsNullOrWhiteSpace(variant.DisplayTopologyFamilyKey) ? "unknown-family" : variant.DisplayTopologyFamilyKey,
                 variant.SavedAt,
                 variant.Icons.Count,
-                BuildVariantSummary(variant, index + 1),
-                BuildVariantDisplays(variant.DisplayTopology)))
+                BuildVariantSummary(variant, index + 1)))
             .ToList();
     }
 
-    private static IReadOnlyList<IconLayoutDisplayFileSnapshot> BuildVariantDisplays(DisplayTopologySnapshot? topology)
-    {
-        if (topology is null)
-        {
-            return [];
-        }
-
-        return topology.Screens
-            .Select((screen, index) => new IconLayoutDisplayFileSnapshot(
-                string.IsNullOrWhiteSpace(screen.DeviceName) ? $"Display {index + 1}" : screen.DeviceName,
-                screen.Primary,
-                screen.WorkingWidth,
-                screen.WorkingHeight,
-                screen.ScalePercent,
-                string.IsNullOrWhiteSpace(screen.Orientation) ? "unknown" : screen.Orientation))
-            .ToList();
-    }
 
     private static string BuildVariantSummary(DesktopIconLayoutVariant variant, int index)
     {
@@ -902,16 +912,19 @@ internal sealed class IconLayoutPersistenceService
 
 internal sealed record IconLayoutVariantFileSnapshot(
     string DisplayTopologyKey,
-    string DisplayTopologyFamilyKey,
     DateTimeOffset SavedAt,
     int IconCount,
-    string Summary,
-    IReadOnlyList<IconLayoutDisplayFileSnapshot> Displays);
+    string Summary);
 
-internal sealed record IconLayoutDisplayFileSnapshot(
-    string DeviceName,
-    bool Primary,
-    int WorkingWidth,
-    int WorkingHeight,
-    int ScalePercent,
-    string Orientation);
+
+/// <summary>
+/// A bounded automatic restore waited for Explorer to expose a stable, exact target-realm view
+/// but reached its configured upper bound. This is a visible transient readiness result, not
+/// evidence that the worker, layout file or Desktop mapping is corrupt.
+/// </summary>
+internal sealed class ShellViewReadinessTimeoutException : TimeoutException
+{
+    public ShellViewReadinessTimeoutException(string message) : base(message)
+    {
+    }
+}

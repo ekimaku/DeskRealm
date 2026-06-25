@@ -17,7 +17,6 @@ DeskRealm does not bundle third-party source code. The following references info
 - `RegNotifyChangeKeyValue`: https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regnotifychangekeyvalue
 - `SHChangeNotify`: https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shchangenotify
 - `IFolderView::SelectAndPositionItems`: https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifolderview-selectandpositionitems
-- WinForms WFO1000 analyzer: https://learn.microsoft.com/en-us/dotnet/desktop/winforms/wfdev-diagnostics/wfo1000
 - .NET 10 downloads / SDK: https://dotnet.microsoft.com/en-us/download/dotnet/10.0
 
 ## Shell icon positioning

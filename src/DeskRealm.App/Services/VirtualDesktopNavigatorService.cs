@@ -73,6 +73,51 @@ internal sealed class VirtualDesktopNavigatorService
         return confirmed;
     }
 
+
+    public VirtualDesktopInfo WaitForNewDesktop(IReadOnlyCollection<Guid> knownDesktopIds, int timeoutMs)
+    {
+        if (knownDesktopIds.Count == 0) throw new InvalidOperationException("Cannot detect a new desktop without a baseline desktop list.");
+        return WaitForCondition(
+            timeoutMs,
+            desktops => desktops.FirstOrDefault(desktop => !knownDesktopIds.Contains(desktop.Id)),
+            "a newly-created Windows virtual desktop");
+    }
+
+    public VirtualDesktopInfo WaitForDesktopRemoval(Guid removedDesktopId, int timeoutMs)
+    {
+        if (removedDesktopId == Guid.Empty) throw new InvalidOperationException("Cannot wait for removal of an empty Windows virtual-desktop GUID.");
+        return WaitForCondition(
+            timeoutMs,
+            desktops => desktops.Any(desktop => desktop.Id == removedDesktopId) ? null : _virtualDesktop.GetCurrentVirtualDesktop(),
+            $"removal of Windows virtual desktop {removedDesktopId:B}");
+    }
+
+    private VirtualDesktopInfo WaitForCondition(
+        int timeoutMs,
+        Func<IReadOnlyList<VirtualDesktopInfo>, VirtualDesktopInfo?> predicate,
+        string expectation)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        Exception? lastError = null;
+        var probe = 0;
+        while (stopwatch.ElapsedMilliseconds <= timeoutMs)
+        {
+            try
+            {
+                var desktops = _virtualDesktop.GetVirtualDesktops();
+                var match = predicate(desktops);
+                if (match is not null) return match;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+            AdaptiveWait(probe++);
+        }
+        var detail = lastError is null ? "no registry exception" : lastError.Message;
+        throw new TimeoutException($"Windows did not confirm {expectation} within {timeoutMs} ms. Last registry detail: {detail}");
+    }
+
     public VirtualDesktopInfo WaitForDesktop(Guid expectedDesktopId, int timeoutMs)
     {
         var stopwatch = Stopwatch.StartNew();

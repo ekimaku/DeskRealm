@@ -104,6 +104,13 @@ internal sealed class IconLayoutWorkerClientService : IDisposable
 
                 if (!response.Success)
                 {
+                    if (string.Equals(response.FailureKind, IconWorkerFailureKinds.ShellReadinessTimeout, StringComparison.Ordinal))
+                    {
+                        throw new IconLayoutShellReadinessTimeoutException(
+                            $"Icon worker reached the bounded Explorer readiness timeout ({request.Operation} {request.RealmName}). " +
+                            (response.Error ?? "No worker diagnostic was returned."));
+                    }
+
                     throw new InvalidOperationException(
                         $"Icon worker failed ({request.Operation} {request.RealmName}): {response.Error}");
                 }
@@ -262,4 +269,22 @@ internal sealed record IconWorkerRequest(
     int ReadinessTimeoutMs,
     int VerificationTimeoutMs);
 
-internal sealed record IconWorkerResponse(Guid Id, bool Success, string? Error);
+internal sealed record IconWorkerResponse(Guid Id, bool Success, string? Error, string? FailureKind = null);
+
+internal static class IconWorkerFailureKinds
+{
+    public const string ShellReadinessTimeout = "shell-readiness-timeout";
+    public const string OperationFailure = "operation-failure";
+}
+
+/// <summary>
+/// Raised by the client only for the explicit worker protocol classification that says Explorer
+/// was still settling. DesktopSwitchService handles this separately from hard worker failures.
+/// </summary>
+internal sealed class IconLayoutShellReadinessTimeoutException : TimeoutException
+{
+    public IconLayoutShellReadinessTimeoutException(string message) : base(message)
+    {
+    }
+}
+

@@ -25,12 +25,6 @@ internal sealed class StartupService
         return value.Contains(exe, StringComparison.OrdinalIgnoreCase);
     }
 
-    public string? GetCurrentCommand()
-    {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
-        return key?.GetValue(ValueName) as string;
-    }
-
     public void Enable()
     {
         var exe = GetExecutablePath();

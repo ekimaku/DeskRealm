@@ -1,0 +1,238 @@
+<!-- DeskRealm-RealmStudio-Schema: v0.7.0 -->
+<Window
+    x:Class="DeskRealm.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls">
+    <Grid x:Name="RootGrid" Background="{StaticResource DeskRealmCanvasBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="42" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid x:Name="AppTitleBar" Grid.Row="0" Background="{StaticResource DeskRealmSurfaceBrush}" BorderBrush="{StaticResource DeskRealmBorderBrush}" BorderThickness="0,0,0,1">
+            <Grid x:Name="AppTitleBarContent">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
+                    <Border Width="24" Height="24" CornerRadius="7" Background="{StaticResource DeskRealmAccentBrush}">
+                        <TextBlock Text="DR" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="9" FontWeight="SemiBold" Foreground="#04252C" />
+                    </Border>
+                    <TextBlock Text="DeskRealm" Foreground="{StaticResource DeskRealmTextBrush}" FontWeight="SemiBold" />
+                    <Border Style="{StaticResource DeskRealmPill}">
+                        <TextBlock Text="REALM STUDIO" FontSize="10" Foreground="{StaticResource DeskRealmMutedBrush}" />
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </Grid>
+
+        <Border Grid.Row="1" Background="{StaticResource DeskRealmSurfaceBrush}" BorderBrush="{StaticResource DeskRealmBorderBrush}" BorderThickness="0,0,0,1" Padding="26,15">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Your Windows workspaces, made visible." FontSize="20" FontWeight="SemiBold" Foreground="{StaticResource DeskRealmTextBrush}" />
+                    <TextBlock x:Name="StatusText" Text="Starting Realm Studio…" Foreground="{StaticResource DeskRealmMutedBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                    <ProgressRing Width="22" Height="22" IsActive="{Binding IsBusy}" />
+                    <Button Content="Refresh" Style="{StaticResource DeskRealmSecondaryButton}" Command="{Binding RefreshCommand}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <NavigationView x:Name="MainNavigation" Grid.Row="2" IsBackButtonVisible="Collapsed" IsSettingsVisible="False" PaneDisplayMode="Left" SelectionChanged="MainNavigation_SelectionChanged" Background="{StaticResource DeskRealmCanvasBrush}" Foreground="{StaticResource DeskRealmTextBrush}">
+            <NavigationView.MenuItems>
+                <NavigationViewItem Content="Realms" Tag="realms" IsSelected="True" />
+                <NavigationViewItem Content="Automation" Tag="automation" />
+                <NavigationViewItem Content="Diagnostics" Tag="diagnostics" />
+            </NavigationView.MenuItems>
+
+            <Grid Margin="20">
+                <ScrollViewer x:Name="RealmsPage" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="16" Padding="0,0,8,24">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="Realms" FontSize="30" FontWeight="SemiBold" />
+                                <TextBlock Text="Every card is linked to the immutable Windows desktop GUID — not its Win+Tab order or visible name." Foreground="{StaticResource DeskRealmMutedBrush}" TextWrapping="Wrap" MaxWidth="760" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Button Content="+ Add" Style="{StaticResource DeskRealmPrimaryButton}" Command="{Binding AddDesktopCommand}" />
+                                <Button Content="Refresh" Style="{StaticResource DeskRealmSecondaryButton}" Command="{Binding RefreshCommand}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <InfoBar IsOpen="True" IsClosable="False" Severity="Informational" Title="Wallpaper per realm">
+                            <TextBlock Text="DeskRealm reconciles readable Windows wallpaper metadata into a managed preview, then applies new images only after an explicit realm commit. Changes remain visible and traceable in the configuration." TextWrapping="Wrap" />
+                        </InfoBar>
+
+                        <ListView ItemsSource="{Binding Realms}" SelectionMode="None" IsItemClickEnabled="False" BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource DeskRealmCard}" Padding="0" Margin="0,0,0,14">
+                                        <Grid MinHeight="218">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="300" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <Border Background="{StaticResource DeskRealmSurfaceRaisedBrush}" CornerRadius="16,0,0,16" BorderBrush="{StaticResource DeskRealmBorderBrush}" BorderThickness="0,0,1,0">
+                                                <Grid>
+                                                    <Image Source="{Binding WallpaperPreview}" Stretch="UniformToFill" />
+                                                    <Border Background="#A006101A" />
+                                                    <Button
+                                                        Content="{Binding WallpaperActionGlyph}"
+                                                        Command="{Binding WallpaperActionCommand}"
+                                                        Style="{StaticResource DeskRealmQuickActionButton}"
+                                                        HorizontalAlignment="Right"
+                                                        VerticalAlignment="Top"
+                                                        Margin="12"
+                                                        controls:ToolTipService.ToolTip="{Binding WallpaperActionTooltip}" />
+                                                    <StackPanel VerticalAlignment="Bottom" Padding="16" Spacing="4">
+                                                        <TextBlock Text="{Binding WallpaperDisplay}" TextWrapping="Wrap" Foreground="{StaticResource DeskRealmTextBrush}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding WallpaperStatus}" TextWrapping="Wrap" Foreground="{StaticResource DeskRealmMutedBrush}" FontSize="11" MaxLines="3" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+
+                                            <StackPanel Grid.Column="1" Padding="20" Spacing="13">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Spacing="3">
+                                                        <TextBlock Text="{Binding Title}" FontSize="23" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                        <TextBlock Text="{Binding DesktopDisplay}" Foreground="{StaticResource DeskRealmMutedBrush}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="7" VerticalAlignment="Top">
+                                                        <Button Content="{Binding DefaultActionGlyph}" Command="{Binding SetDefaultRealmCommand}" Style="{StaticResource DeskRealmQuickActionButton}" controls:ToolTipService.ToolTip="{Binding DefaultActionTooltip}" />
+                                                        <Button Content="{Binding RealmLockActionGlyph}" Command="{Binding ToggleRealmLockCommand}" Style="{StaticResource DeskRealmQuickActionButton}" controls:ToolTipService.ToolTip="{Binding RealmLockActionTooltip}" />
+                                                        <Border Style="{StaticResource DeskRealmPill}" VerticalAlignment="Center" Background="{Binding ActivePillBrush}"><TextBlock Text="{Binding ActiveLabel}" FontSize="11" FontWeight="SemiBold" /></Border>
+                                                    </StackPanel>
+                                                </Grid>
+
+                                                <Grid ColumnSpacing="10" RowSpacing="10">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource DeskRealmSurfaceRaisedBrush}" CornerRadius="10" Padding="11">
+                                                        <StackPanel Spacing="2"><TextBlock Text="ICONS" FontSize="10" Foreground="{StaticResource DeskRealmMutedBrush}" /><TextBlock Text="{Binding IconCountDisplay}" FontWeight="SemiBold" /></StackPanel>
+                                                    </Border>
+                                                    <Border Grid.Row="0" Grid.Column="1" Background="{StaticResource DeskRealmSurfaceRaisedBrush}" CornerRadius="10" Padding="11">
+                                                        <Grid RowSpacing="8">
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="Auto" />
+                                                                <RowDefinition Height="Auto" />
+                                                            </Grid.RowDefinitions>
+                                                            <Grid ColumnSpacing="8" Visibility="{Binding HotkeyDisplayVisibility}">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <StackPanel Spacing="2">
+                                                                    <TextBlock Text="HOTKEY" FontSize="10" Foreground="{StaticResource DeskRealmMutedBrush}" />
+                                                                    <TextBlock Text="{Binding HotkeyDisplay}" FontWeight="SemiBold" />
+                                                                </StackPanel>
+                                                                <Button Grid.Column="1" Content="{Binding HotkeyActionGlyph}" Command="{Binding HotkeyActionCommand}" Visibility="{Binding HotkeyEditActionVisibility}" Style="{StaticResource DeskRealmQuickActionButton}" controls:ToolTipService.ToolTip="{Binding HotkeyActionTooltip}" />
+                                                            </Grid>
+                                                            <StackPanel Grid.Row="0" Spacing="6" Visibility="{Binding HotkeyEditorVisibility}">
+                                                                <TextBlock Text="HOTKEY" FontSize="10" Foreground="{StaticResource DeskRealmMutedBrush}" />
+                                                                <ContentControl Content="{Binding HotkeyEditor}" HorizontalContentAlignment="Stretch" />
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Visibility="{Binding HotkeyEditorActionsVisibility}">
+                                                                <Button Content="Reset" Command="{Binding ResetHotkeyCommand}" Style="{StaticResource DeskRealmSecondaryButton}" controls:ToolTipService.ToolTip="Restore the hotkey that was assigned before this edit started" />
+                                                                <Button Content="💾" Command="{Binding HotkeyActionCommand}" Style="{StaticResource DeskRealmQuickActionButton}" controls:ToolTipService.ToolTip="Save realm hotkey" />
+                                                                <Button Content="×" Command="{Binding CancelHotkeyCommand}" Visibility="{Binding CancelHotkeyVisibility}" Style="{StaticResource DeskRealmQuickActionButton}" controls:ToolTipService.ToolTip="Cancel hotkey edit" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </Border>
+                                                    <Border Grid.Row="1" Grid.Column="0" Background="{StaticResource DeskRealmSurfaceRaisedBrush}" CornerRadius="10" Padding="11">
+                                                        <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                                                            <Button Content="{Binding RealmLockActionGlyph}" Command="{Binding ToggleRealmLockCommand}" Style="{StaticResource DeskRealmQuickActionButton}" controls:ToolTipService.ToolTip="{Binding RealmLockActionTooltip}" />
+                                                            <StackPanel Spacing="2"><TextBlock Text="REALM LOCK" FontSize="10" Foreground="{StaticResource DeskRealmMutedBrush}" /><TextBlock Text="{Binding LockDisplay}" FontWeight="SemiBold" /></StackPanel>
+                                                        </StackPanel>
+                                                    </Border>
+                                                    <Border Grid.Row="1" Grid.Column="1" Background="{StaticResource DeskRealmSurfaceRaisedBrush}" CornerRadius="10" Padding="11">
+                                                        <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                                                            <Button Content="{Binding DefaultActionGlyph}" Command="{Binding SetDefaultRealmCommand}" Style="{StaticResource DeskRealmQuickActionButton}" controls:ToolTipService.ToolTip="{Binding DefaultActionTooltip}" />
+                                                            <StackPanel Spacing="2"><TextBlock Text="DEFAULT REALM" FontSize="10" Foreground="{StaticResource DeskRealmMutedBrush}" /><TextBlock Text="{Binding DefaultActionTooltip}" FontWeight="SemiBold" /></StackPanel>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </Grid>
+
+                                                <TextBlock Text="{Binding RealmPathDisplay}" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource DeskRealmMutedBrush}" />
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <Button Content="Switch" Style="{StaticResource DeskRealmPrimaryButton}" Command="{Binding SwitchCommand}" />
+                                                    <Button Content="Edit" Style="{StaticResource DeskRealmSecondaryButton}" Command="{Binding EditCommand}" />
+                                                    <Button Content="Delete" Style="{StaticResource DeskRealmDangerButton}" Command="{Binding DeleteCommand}" Visibility="{Binding DeleteVisibility}" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="AutomationPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="14" Padding="0,0,8,24">
+                        <TextBlock Text="Automation" FontSize="28" FontWeight="SemiBold" />
+                        <TextBlock Text="These settings change the global engine. Realm-specific actions stay in each card and the unified modal." Foreground="{StaticResource DeskRealmMutedBrush}" TextWrapping="Wrap" />
+                        <Border Style="{StaticResource DeskRealmCard}">
+                            <StackPanel Spacing="14">
+                                <ToggleSwitch Header="Enable DeskRealm automation" IsOn="{Binding AutomationEnabled, Mode=TwoWay}" />
+                                <ToggleSwitch Header="Start DeskRealm with Windows" IsOn="{Binding StartWithWindows, Mode=TwoWay}" />
+                                <ToggleSwitch Header="Start minimized" IsOn="{Binding StartMinimized, Mode=TwoWay}" OnContent="Notification area" OffContent="Show Realm Studio" />
+                                <TextBlock Text="{Binding StartMinimizedDescription}" TextWrapping="Wrap" Foreground="{StaticResource DeskRealmMutedBrush}" Margin="0,-8,0,0" />
+                                <ToggleSwitch Header="Enable global realm hotkeys" IsOn="{Binding HotkeysEnabled, Mode=TwoWay}" />
+                                <Border Background="{StaticResource DeskRealmSurfaceRaisedBrush}" CornerRadius="10" Padding="12">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="Windows desktop name application" FontWeight="SemiBold" />
+                                        <ToggleSwitch Header="Remember realm-name apply behavior" IsOn="{Binding RememberRealmRenameApplyMode, Mode=TwoWay}" />
+                                        <ToggleSwitch Header="Restart Windows Explorer after a realm rename" IsOn="{Binding RestartExplorerAfterRealmRename, Mode=TwoWay}" IsEnabled="{Binding RememberRealmRenameApplyMode}" />
+                                        <TextBlock Text="{Binding RealmRenameApplyDescription}" TextWrapping="Wrap" Foreground="{StaticResource DeskRealmMutedBrush}" />
+                                    </StackPanel>
+                                </Border>
+                                <TextBlock Text="The realm marked ★ Default is activated when DeskRealm starts only while automation is enabled." TextWrapping="Wrap" Foreground="{StaticResource DeskRealmMutedBrush}" />
+                                <Button Content="Apply settings" Style="{StaticResource DeskRealmPrimaryButton}" HorizontalAlignment="Left" Command="{Binding ApplySettingsCommand}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="DiagnosticsPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="14" Padding="0,0,8,24">
+                        <TextBlock Text="Diagnostics &amp; recovery" FontSize="28" FontWeight="SemiBold" />
+                        <TextBlock Text="DeskRealm does not apply silent behavior. Save and recovery actions remain explicit." Foreground="{StaticResource DeskRealmMutedBrush}" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Save current layout" Style="{StaticResource DeskRealmPrimaryButton}" Command="{Binding SaveLayoutCommand}" />
+                            <Button Content="Restore layout" Style="{StaticResource DeskRealmSecondaryButton}" Command="{Binding RestoreLayoutCommand}" />
+                            <Button Content="Sync names" Style="{StaticResource DeskRealmSecondaryButton}" Command="{Binding SyncNamesCommand}" />
+                        </StackPanel>
+                        <Border Style="{StaticResource DeskRealmCard}">
+                            <TextBox Text="{Binding DiagnosticText}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="280" Background="Transparent" BorderThickness="0" FontFamily="Consolas" />
+                        </Border>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Open configuration" Style="{StaticResource DeskRealmSecondaryButton}" Command="{Binding OpenConfigCommand}" />
+                            <Button Content="Open logs" Style="{StaticResource DeskRealmSecondaryButton}" Command="{Binding OpenLogsCommand}" />
+                            <Button Content="Restart DeskRealm" Style="{StaticResource DeskRealmSecondaryButton}" Command="{Binding RestartCommand}" />
+                            <Button Content="Quit DeskRealm" Style="{StaticResource DeskRealmDangerButton}" Command="{Binding QuitCommand}" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </NavigationView>
+    </Grid>
+</Window>

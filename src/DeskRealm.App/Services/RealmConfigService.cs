@@ -25,10 +25,8 @@ internal sealed class RealmConfigService
             {
                 OriginalDesktopPath = currentDesktopPath,
                 RealmsRoot = Path.Combine(currentDesktopPath, "DeskRealm"),
-                NextRealmNumber = 1,
                 Enabled = true,
-                InitialDesktopImportPromptCompleted = false,
-                InitialDesktopImportMoveFiles = false
+                InitialDesktopImportPromptCompleted = false
             };
 
             Save(initial);
@@ -39,6 +37,13 @@ internal sealed class RealmConfigService
         var raw = File.ReadAllText(AppPaths.ConfigPath);
         var config = JsonSerializer.Deserialize<RealmConfig>(raw, _jsonOptions)
             ?? throw new InvalidOperationException("Unreadable config JSON: empty deserialization.");
+
+        if (config.Version > RealmConfig.CurrentVersion)
+        {
+            throw new InvalidOperationException(
+                $"Config schema v{config.Version} is newer than this DeskRealm build (supports up to v{RealmConfig.CurrentVersion}). " +
+                "Use a compatible DeskRealm version instead of downgrading the config implicitly.");
+        }
 
         if (string.IsNullOrWhiteSpace(config.OriginalDesktopPath))
         {
@@ -77,29 +82,27 @@ internal sealed class RealmConfigService
             // New configs are created directly at v5 with InitialDesktopImportPromptCompleted=false.
             config.InitialDesktopImportPromptCompleted = true;
             config.InitialDesktopImportPromptEnabled = true;
-            config.InitialDesktopImportMoveFiles = true;
-            config.InitialDesktopImportSaveLayout = true;
             config.Version = 5;
             _logger.Warn("Config migration v5: initial Desktop import assistant available only for new installations.");
         }
 
         if (config.Version < 6)
         {
-            config.InitialDesktopImportMoveFiles = false;
             config.Version = 6;
             _logger.Warn("Config migration v6: safe initial Desktop import. DeskRealm associates the original Desktop without moving files.");
         }
 
         if (config.Version < 7)
         {
-            if (UsesLegacyDefaultDesktopHotkeys(config.DesktopHotkeys))
+            config.LegacyDesktopHotkeys ??= RealmConfig.CreateLegacyDefaultDesktopHotkeys();
+            if (UsesLegacyDefaultDesktopHotkeys(config.LegacyDesktopHotkeys))
             {
-                config.DesktopHotkeys = RealmConfig.CreateDefaultDesktopHotkeys();
+                config.LegacyDesktopHotkeys = RealmConfig.CreateLegacyDefaultDesktopHotkeys();
                 _logger.Warn("Config migration v7: default hotkeys changed to Win+Shift+X/C/B/N to avoid Win+Shift+W/V.");
             }
             else
             {
-                _logger.Warn("Config migration v7: custom hotkeys preserved.");
+                _logger.Warn("Config migration v7: custom hotkeys preserved for GUID migration.");
             }
 
             config.Version = 7;
@@ -139,14 +142,15 @@ internal sealed class RealmConfigService
                 "DeskRealm now uses registry notifications, modifier release checks, per-step GUID confirmation and adaptive Shell verification.");
         }
 
+        config.Assignments = NormalizeAssignments(config.Assignments);
         config.LockedIconLayouts = NormalizeLockDictionary(config.LockedIconLayouts);
         config.LockedRealms = NormalizeLockDictionary(config.LockedRealms);
         config.LockedIconLayoutVariants = NormalizeLockDictionary(config.LockedIconLayoutVariants);
+        config.RealmHotkeys = NormalizeRealmHotkeys(config.RealmHotkeys);
+        config.RealmProfiles = NormalizeRealmProfiles(config.RealmProfiles);
+        config.RealmWallpapers = NormalizeRealmWallpapers(config.RealmWallpapers);
+        config.ArchivedRealmProfiles = NormalizeArchivedRealmProfiles(config.ArchivedRealmProfiles);
 
-        if (config.NextRealmNumber < 1)
-        {
-            throw new InvalidOperationException("nextRealmNumber is invalid. Strict minimum value: 1.");
-        }
 
         if (config.RealmNameMaxLength is < 16 or > 120)
         {
@@ -178,19 +182,138 @@ internal sealed class RealmConfigService
             throw new InvalidOperationException("desktopStepConfirmationTimeoutMs invalid. Strict allowed value: 250 to 10000 ms.");
         }
 
-        if (config.DesktopHotkeysEnabled)
+        if (!Enum.IsDefined(config.RealmRenameApplyMode))
         {
-            ValidateDesktopHotkeys(config);
+            throw new InvalidOperationException("realmRenameApplyMode invalid. Strict allowed values: Ask, RestartExplorer, NextReboot.");
         }
 
+        if (config.DesktopHotkeysEnabled)
+        {
+            if (config.Version < 12)
+            {
+                ValidateLegacyDesktopHotkeys(config);
+            }
+            else
+            {
+                ValidateRealmHotkeys(config);
+            }
+        }
+
+        ValidateRealmProfiles(config);
+        ValidateRealmWallpapers(config);
+        ValidateArchivedRealmProfiles(config);
         ValidateLockDictionary(config.LockedIconLayouts, "lockedIconLayouts");
         ValidateRealmLockDictionary(config.LockedRealms, "lockedRealms");
         ValidateVariantLockDictionary(config.LockedIconLayoutVariants, "lockedIconLayoutVariants");
 
-        Save(config);
+        // A config below v12 still needs Windows desktop GUIDs to migrate its
+        // number-based hotkeys. DesktopSwitchService performs that binding and
+        // saves the canonical config immediately afterwards; saving here would
+        // discard the one-time import payload before it can be mapped.
+        if (config.Version >= 12)
+        {
+            Save(config);
+        }
         return config;
     }
 
+
+    private static Dictionary<string, string> NormalizeAssignments(Dictionary<string, string>? assignments)
+    {
+        var normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (assignments is null)
+        {
+            return normalized;
+        }
+
+        foreach (var pair in assignments)
+        {
+            if (!Guid.TryParse(pair.Key, out var desktopId))
+            {
+                throw new InvalidOperationException($"assignments contains an invalid Windows desktop GUID key: '{pair.Key}'.");
+            }
+
+            if (string.IsNullOrWhiteSpace(pair.Value))
+            {
+                throw new InvalidOperationException($"assignments[{pair.Key}] is empty.");
+            }
+
+            var key = desktopId.ToString("B");
+            var assignment = pair.Value.Trim();
+            if (normalized.TryGetValue(key, out var existing))
+            {
+                if (!string.Equals(existing, assignment, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"assignments contains conflicting representations of Windows desktop GUID {desktopId:B}.");
+                }
+
+                continue;
+            }
+
+            normalized.Add(key, assignment);
+        }
+
+        return normalized;
+    }
+
+    private static Dictionary<string, string> NormalizeRealmHotkeys(Dictionary<string, string>? hotkeys)
+    {
+        var normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (hotkeys is null)
+        {
+            return normalized;
+        }
+
+        foreach (var pair in hotkeys)
+        {
+            if (!Guid.TryParse(pair.Key, out var desktopId))
+            {
+                throw new InvalidOperationException($"realmHotkeys contains an invalid Windows desktop GUID key: '{pair.Key}'.");
+            }
+            if (string.IsNullOrWhiteSpace(pair.Value))
+            {
+                throw new InvalidOperationException($"realmHotkeys[{pair.Key}] is empty.");
+            }
+
+            var key = desktopId.ToString("D");
+            if (!normalized.TryAdd(key, pair.Value.Trim()))
+            {
+                throw new InvalidOperationException($"realmHotkeys contains duplicate representations of Windows desktop GUID {desktopId:B}.");
+            }
+        }
+
+        return normalized;
+    }
+
+    private static Dictionary<string, RealmProfile> NormalizeRealmProfiles(Dictionary<string, RealmProfile>? profiles)
+    {
+        var normalized = new Dictionary<string, RealmProfile>(StringComparer.OrdinalIgnoreCase);
+        if (profiles is null)
+        {
+            return normalized;
+        }
+
+        foreach (var pair in profiles)
+        {
+            if (!Guid.TryParse(pair.Key, out var desktopId))
+            {
+                throw new InvalidOperationException($"realmProfiles contains an invalid Windows desktop GUID key: '{pair.Key}'.");
+            }
+            if (pair.Value is null)
+            {
+                throw new InvalidOperationException($"realmProfiles[{pair.Key}] cannot be null.");
+            }
+
+            var key = desktopId.ToString("D");
+            if (!normalized.TryAdd(key, pair.Value))
+            {
+                throw new InvalidOperationException($"realmProfiles contains duplicate representations of Windows desktop GUID {desktopId:B}.");
+            }
+        }
+
+        return normalized;
+    }
 
     private static Dictionary<string, bool> NormalizeLockDictionary(Dictionary<string, bool>? locks)
     {
@@ -310,15 +433,17 @@ internal sealed class RealmConfigService
                hotkeys.TryGetValue("6", out var d6) && string.Equals(d6, "Win+Shift+N", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void ValidateDesktopHotkeys(RealmConfig config)
+    private static void ValidateLegacyDesktopHotkeys(RealmConfig config)
     {
-        if (config.DesktopHotkeys.Count == 0)
+        var legacyHotkeys = config.LegacyDesktopHotkeys
+            ?? throw new InvalidOperationException("desktopHotkeysEnabled=true but legacy desktopHotkeys is missing.");
+        if (legacyHotkeys.Count == 0)
         {
             throw new InvalidOperationException("desktopHotkeysEnabled=true but desktopHotkeys is empty.");
         }
 
         var seenCombos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pair in config.DesktopHotkeys)
+        foreach (var pair in legacyHotkeys)
         {
             if (!int.TryParse(pair.Key, out var desktopNumber) || desktopNumber < 1 || desktopNumber > 32)
             {
@@ -334,6 +459,102 @@ internal sealed class RealmConfigService
             {
                 throw new InvalidOperationException($"Duplicate hotkey shortcut: {pair.Value}.");
             }
+        }
+    }
+
+    private static void ValidateRealmHotkeys(RealmConfig config)
+    {
+        var seenCombos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in config.RealmHotkeys)
+        {
+            if (!Guid.TryParse(pair.Key, out var desktopId))
+            {
+                throw new InvalidOperationException($"realmHotkeys contains an invalid Windows desktop GUID key: '{pair.Key}'.");
+            }
+
+            if (string.IsNullOrWhiteSpace(pair.Value))
+            {
+                throw new InvalidOperationException($"realmHotkeys[{pair.Key}] is empty.");
+            }
+
+            var normalized = HotkeyParser.Parse(desktopId, pair.Value).Text;
+            if (!seenCombos.Add(normalized))
+            {
+                throw new InvalidOperationException($"Duplicate realm hotkey shortcut: {normalized}.");
+            }
+        }
+    }
+
+    private static void ValidateRealmProfiles(RealmConfig config)
+    {
+        foreach (var pair in config.RealmProfiles)
+        {
+            if (!Guid.TryParse(pair.Key, out _))
+            {
+                throw new InvalidOperationException($"realmProfiles contains an invalid Windows desktop GUID key: '{pair.Key}'.");
+            }
+            if (pair.Value is null)
+            {
+                throw new InvalidOperationException($"realmProfiles[{pair.Key}] cannot be null.");
+            }
+        }
+    }
+
+
+    private static Dictionary<string, RealmWallpaper> NormalizeRealmWallpapers(Dictionary<string, RealmWallpaper>? wallpapers)
+    {
+        var normalized = new Dictionary<string, RealmWallpaper>(StringComparer.OrdinalIgnoreCase);
+        if (wallpapers is null) return normalized;
+        foreach (var pair in wallpapers)
+        {
+            if (!Guid.TryParse(pair.Key, out var desktopId))
+            {
+                throw new InvalidOperationException($"realmWallpapers contains an invalid Windows desktop GUID key: '{pair.Key}'.");
+            }
+            if (pair.Value is null || string.IsNullOrWhiteSpace(pair.Value.ManagedPath))
+            {
+                throw new InvalidOperationException($"realmWallpapers[{pair.Key}] must contain a managedPath.");
+            }
+            if (!normalized.TryAdd(desktopId.ToString("D"), pair.Value))
+            {
+                throw new InvalidOperationException($"realmWallpapers contains duplicate representations of Windows desktop GUID {desktopId:B}.");
+            }
+        }
+        return normalized;
+    }
+
+    private static Dictionary<string, ArchivedRealmProfile> NormalizeArchivedRealmProfiles(Dictionary<string, ArchivedRealmProfile>? archives)
+    {
+        var normalized = new Dictionary<string, ArchivedRealmProfile>(StringComparer.OrdinalIgnoreCase);
+        if (archives is null) return normalized;
+        foreach (var pair in archives)
+        {
+            var name = pair.Key?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name)) throw new InvalidOperationException("archivedRealmProfiles contains an empty realm-name key.");
+            if (pair.Value is null || !Guid.TryParse(pair.Value.SourceDesktopId, out _))
+            {
+                throw new InvalidOperationException($"archivedRealmProfiles['{pair.Key}'] must contain a valid sourceDesktopId.");
+            }
+            normalized[name] = pair.Value;
+        }
+        return normalized;
+    }
+
+    private static void ValidateRealmWallpapers(RealmConfig config)
+    {
+        foreach (var pair in config.RealmWallpapers)
+        {
+            if (!Guid.TryParse(pair.Key, out _)) throw new InvalidOperationException($"realmWallpapers contains an invalid Windows desktop GUID key: '{pair.Key}'.");
+            if (pair.Value is null || string.IsNullOrWhiteSpace(pair.Value.ManagedPath)) throw new InvalidOperationException($"realmWallpapers[{pair.Key}] must contain a managedPath.");
+        }
+    }
+
+    private static void ValidateArchivedRealmProfiles(RealmConfig config)
+    {
+        foreach (var pair in config.ArchivedRealmProfiles)
+        {
+            if (string.IsNullOrWhiteSpace(pair.Key)) throw new InvalidOperationException("archivedRealmProfiles contains an empty realm-name key.");
+            if (pair.Value is null || !Guid.TryParse(pair.Value.SourceDesktopId, out _)) throw new InvalidOperationException($"archivedRealmProfiles['{pair.Key}'] must contain a valid sourceDesktopId.");
         }
     }
 

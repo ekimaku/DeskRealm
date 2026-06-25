@@ -2,16 +2,16 @@ $ErrorActionPreference = "Stop"
 
 $ConfigPath = Join-Path $env:APPDATA "DeskRealm\deskrealm.config.json"
 if (-not (Test-Path $ConfigPath)) {
-    throw "Config DeskRealm introuvable : $ConfigPath"
+    throw "DeskRealm config was not found: $ConfigPath"
 }
 
 $Config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
 $Original = [string]$Config.originalDesktopPath
 if ([string]::IsNullOrWhiteSpace($Original)) {
-    throw "originalDesktopPath absent dans $ConfigPath"
+    throw "originalDesktopPath is missing from $ConfigPath"
 }
 if (-not (Test-Path $Original)) {
-    throw "Desktop original introuvable : $Original"
+    throw "Original Desktop was not found: $Original"
 }
 
 $code = @"
@@ -44,4 +44,4 @@ public static class KnownFolderRestore
 
 Add-Type -TypeDefinition $code
 [KnownFolderRestore]::Restore($Original)
-Write-Host "Desktop restauré : $Original" -ForegroundColor Green
+Write-Host "Desktop restored: $Original" -ForegroundColor Green

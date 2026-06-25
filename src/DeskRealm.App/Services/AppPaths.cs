@@ -12,6 +12,8 @@ internal static class AppPaths
 
     public static string ConfigPath => Path.Combine(AppDataRoot, "deskrealm.config.json");
 
+    public static string WallpapersRoot => Path.Combine(AppDataRoot, "wallpapers");
+
     public static string LogDirectory => Path.Combine(LocalAppDataRoot, "logs");
 
     public static string LogFilePath => Path.Combine(LogDirectory, "deskrealm.log");

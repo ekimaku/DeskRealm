@@ -1,17 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>14.0</LangVersion>
-    <UseWindowsForms>true</UseWindowsForms>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <AppxPackage>false</AppxPackage>
+    <EnableMsixTooling>false</EnableMsixTooling>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>Assets\DeskRealm.ico</ApplicationIcon>
     <AssemblyName>DeskRealm.App</AssemblyName>
     <RootNamespace>DeskRealm.App</RootNamespace>
-    <Version>0.6.0</Version>
+    <Version>0.7.0</Version>
     <Authors>Ayahua</Authors>
     <Company>Ayahua</Company>
     <Copyright>Copyright (c) 2026 Ayahua</Copyright>
@@ -20,4 +23,21 @@
     <RepositoryUrl>https://github.com/ekimaku/DeskRealm</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
+
+  <!--
+    Windows App SDK needs PRI embedded-resource generation for an unpackaged
+    self-contained single-file publish. Keep MSIX tooling off for normal builds;
+    turn it on only for the explicit PublishSingleFile release path.
+  -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <EnableMsixTooling>true</EnableMsixTooling>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Update="Assets\DeskRealm.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

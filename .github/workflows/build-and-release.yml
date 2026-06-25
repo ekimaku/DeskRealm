@@ -1,14 +1,16 @@
-name: Build and release
+name: Build, validate and release
 
 on:
   push:
     branches: [ main ]
     tags:
       - 'v*'
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-windows:
@@ -28,20 +30,42 @@ jobs:
         id: version
         shell: pwsh
         run: |
+          $baseVersion = (Get-Content VERSION.txt -Raw -Encoding UTF8).Trim()
           if ($env:GITHUB_REF -like 'refs/tags/v*') {
             $version = $env:GITHUB_REF_NAME.TrimStart('v')
-          } else {
-            $version = '0.6.0-dev'
+            if ($version -ne $baseVersion) {
+              throw "Tag version $version does not match VERSION.txt $baseVersion."
+            }
+          }
+          else {
+            $version = "$baseVersion-ci.$env:GITHUB_RUN_NUMBER"
           }
           "version=$version" >> $env:GITHUB_OUTPUT
-          "tag=$env:GITHUB_REF_NAME" >> $env:GITHUB_OUTPUT
-          Write-Host "DeskRealm version: $version"
+          Write-Host "DeskRealm artifact version: $version"
 
-      - name: Restore
-        run: dotnet restore DeskRealm.sln
+      - name: Validate tagged release metadata
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $tagVersion = $env:GITHUB_REF_NAME.TrimStart('v')
+          $releaseNotes = "docs/release-notes/v$tagVersion.md"
+          $releaseControl = "docs/validation/v$tagVersion-release-control.md"
+          if (-not (Test-Path -LiteralPath $releaseNotes)) {
+            throw "Release notes are missing for tag $env:GITHUB_REF_NAME: $releaseNotes"
+          }
+          if (-not (Test-Path -LiteralPath $releaseControl)) {
+            throw "Release-control validation is missing for tag $env:GITHUB_REF_NAME: $releaseControl"
+          }
+          $notes = Get-Content -LiteralPath $releaseNotes -Raw -Encoding UTF8
+          if ($notes -match '(?im)^>\s*draft|not public until|validation required before publication') {
+            throw "Release notes still contain draft/publication-gate wording."
+          }
 
-      - name: Build
-        run: dotnet build DeskRealm.sln --configuration Release --no-restore
+      - name: Restore publish dependencies
+        run: dotnet restore src/DeskRealm.App/DeskRealm.App.csproj --runtime win-x64
+
+      - name: Build Release
+        run: dotnet build src/DeskRealm.App/DeskRealm.App.csproj --configuration Release --no-restore
 
       - name: Publish self-contained win-x64 app
         shell: pwsh
@@ -52,17 +76,20 @@ jobs:
             --runtime win-x64 `
             --self-contained true `
             --output $publishDir `
+            --no-restore `
             /p:PublishSingleFile=true `
+            /p:WindowsAppSDKSelfContained=true `
             /p:IncludeNativeLibrariesForSelfExtract=true `
             /p:PublishTrimmed=false `
             /p:Version=${{ steps.version.outputs.version }}
 
+          if (-not (Test-Path -LiteralPath (Join-Path $publishDir 'DeskRealm.App.exe'))) {
+            throw 'Publish completed without DeskRealm.App.exe.'
+          }
           Copy-Item LICENSE $publishDir -Force
           Copy-Item NOTICE $publishDir -Force
           Copy-Item README.md $publishDir -Force
           Copy-Item VERSION.txt $publishDir -Force
-          New-Item -ItemType Directory -Force -Path (Join-Path $publishDir 'docs') | Out-Null
-          Copy-Item docs/SAFETY_AND_PRIVACY.md (Join-Path $publishDir 'docs') -Force
           Copy-Item scripts/Restore-Desktop.ps1 $publishDir -Force
 
       - name: Create portable ZIP
@@ -91,31 +118,48 @@ jobs:
           2. Open PowerShell in this folder.
           3. Run:
              powershell -ExecutionPolicy Bypass -File .\Install-DeskRealm.ps1
-
-          This installs DeskRealm to:
-            %LOCALAPPDATA%\Programs\DeskRealm
-
-          To uninstall later:
-             powershell -ExecutionPolicy Bypass -File .\Uninstall-DeskRealm.ps1
           "@ | Set-Content -Encoding UTF8 (Join-Path $bundle 'README-INSTALL.txt')
           Compress-Archive -Path "$bundle/*" -DestinationPath "artifacts/release/DeskRealm-$version-win-x64-install-bundle.zip" -Force
+
+      - name: Create SHA-256 checksums
+        shell: pwsh
+        run: |
+          $checksums = Get-ChildItem artifacts/release/*.zip | Sort-Object Name | ForEach-Object {
+            $hash = Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256
+            "$($hash.Hash.ToLowerInvariant())  $($_.Name)"
+          }
+          $checksums | Set-Content -Encoding ASCII artifacts/release/SHA256SUMS.txt
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: DeskRealm-windows-artifacts
-          path: artifacts/release/*.zip
+          name: DeskRealm-windows-artifacts-${{ steps.version.outputs.version }}
+          path: artifacts/release/*
+          retention-days: 14
+
+  release:
+    name: Create GitHub release
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: DeskRealm-windows-artifacts-*
+          path: artifacts/release
+          merge-multiple: true
 
       - name: Create GitHub Release from tag
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = $env:GITHUB_REF_NAME
-          $notesPath = "docs/release-notes/$tag.md"
-          if (Test-Path $notesPath) {
-            gh release create $tag artifacts/release/*.zip --title "DeskRealm $tag" --notes-file $notesPath
-          } else {
-            gh release create $tag artifacts/release/*.zip --title "DeskRealm $tag" --notes "Automated DeskRealm release. See CHANGELOG.md for details."
-          }
+          gh release create $tag artifacts/release/* --title "DeskRealm $tag" --notes-file "docs/release-notes/$tag.md"

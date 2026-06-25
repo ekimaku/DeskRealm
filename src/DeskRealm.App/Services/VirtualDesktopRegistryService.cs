@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 
 namespace DeskRealm.App.Services;
@@ -10,6 +11,11 @@ internal sealed class VirtualDesktopRegistryService
 
     private readonly FileLogger _logger;
     private readonly HashSet<string> _loggedCurrentDesktopSources = new(StringComparer.OrdinalIgnoreCase);
+    // Explorer can briefly recreate the VirtualDesktops metadata tree after a deliberate
+    // Explorer restart. Keep the last confirmed label per immutable GUID so an in-process
+    // registry reconciliation never turns an established realm into a transient "Desktop N".
+    private readonly ConcurrentDictionary<Guid, string> _confirmedDesktopNames = new();
+    private readonly ConcurrentDictionary<Guid, byte> _fallbackNameWarnings = new();
 
     public VirtualDesktopRegistryService(FileLogger logger) => _logger = logger;
 
@@ -35,8 +41,40 @@ internal sealed class VirtualDesktopRegistryService
             Array.Copy(ids, offset, buffer, 0, 16);
             var id = new Guid(buffer);
             var number = list.Count + 1;
-            var name = GetDesktopName(key, id) ?? $"Desktop {number}";
-            list.Add(new VirtualDesktopInfo(id, name, number));
+            var registryName = GetDesktopName(key, id);
+            if (!string.IsNullOrWhiteSpace(registryName))
+            {
+                var confirmed = registryName.Trim();
+                _confirmedDesktopNames[id] = confirmed;
+                _fallbackNameWarnings.TryRemove(id, out _);
+                list.Add(new VirtualDesktopInfo(id, confirmed, number));
+                continue;
+            }
+
+            if (_confirmedDesktopNames.TryGetValue(id, out var cachedName))
+            {
+                if (_fallbackNameWarnings.TryAdd(id, 0))
+                {
+                    _logger.Warn(
+                        $"Explorer virtual-desktop name metadata is temporarily unavailable for {id:B}; " +
+                        $"retaining the last confirmed label '{cachedName}' during shell recovery.");
+                }
+
+                list.Add(new VirtualDesktopInfo(id, cachedName, number));
+                continue;
+            }
+
+            // This is the initial Windows default label, or metadata that has not settled yet.
+            // The flag lets higher-level code distinguish it from an actual Registry-confirmed name.
+            var fallback = $"Desktop {number}";
+            if (_fallbackNameWarnings.TryAdd(id, 0))
+            {
+                _logger.Warn(
+                    $"Explorer did not expose a stored name for virtual desktop {id:B}; using provisional label '{fallback}'. " +
+                    "DeskRealm will not treat this as a confirmed rename.");
+            }
+
+            list.Add(new VirtualDesktopInfo(id, fallback, number, NameIsFallback: true));
         }
 
         return list;
@@ -47,7 +85,7 @@ internal sealed class VirtualDesktopRegistryService
         var candidates = GetCurrentVirtualDesktopCandidates();
         if (candidates.Count == 0)
         {
-            throw new InvalidOperationException(BuildCurrentDesktopError("Aucune source registry exploitable n'a fourni CurrentVirtualDesktop."));
+            throw new InvalidOperationException(BuildCurrentDesktopError("No usable registry source provided CurrentVirtualDesktop."));
         }
 
         return candidates[0].Id;
@@ -73,11 +111,33 @@ internal sealed class VirtualDesktopRegistryService
 
         var knownIds = string.Join(", ", desktopIds.Select(id => id.ToString("B")));
         var candidateIds = candidates.Count == 0
-            ? "aucun"
+            ? "none"
             : string.Join(", ", candidates.Select(c => $"{c.Id:B} via {c.Source}"));
 
         throw new InvalidOperationException(BuildCurrentDesktopError(
             $"No valid CurrentVirtualDesktop matches VirtualDesktopIDs. Candidates: {candidateIds}. Known: {knownIds}"));
+    }
+
+
+    public void SetDesktopName(Guid desktopId, string name)
+    {
+        if (desktopId == Guid.Empty) throw new InvalidOperationException("Cannot rename an empty Windows virtual-desktop GUID.");
+        var normalized = string.IsNullOrWhiteSpace(name) ? throw new InvalidOperationException("A Windows virtual desktop name cannot be empty.") : name.Trim();
+        using var key = Registry.CurrentUser.OpenSubKey(VirtualDesktopsKey, writable: true)
+            ?? throw new InvalidOperationException($"Registry not found: HKCU\\{VirtualDesktopsKey}");
+
+        foreach (var formattedId in new[] { desktopId.ToString("B"), desktopId.ToString("D"), desktopId.ToString("N") })
+        {
+            using var desktopKey = key.OpenSubKey($@"Desktops\{formattedId}", writable: true);
+            if (desktopKey is null) continue;
+            desktopKey.SetValue("Name", normalized, RegistryValueKind.String);
+            _confirmedDesktopNames[desktopId] = normalized;
+            _fallbackNameWarnings.TryRemove(desktopId, out _);
+            _logger.Info($"Windows virtual desktop name persisted in Explorer Registry metadata: {desktopId:B} -> '{normalized}'.");
+            return;
+        }
+
+        throw new InvalidOperationException($"Windows desktop metadata key was not found for {desktopId:B}. Open Win+Tab once and retry.");
     }
 
     private IReadOnlyList<CurrentDesktopCandidate> GetCurrentVirtualDesktopCandidates()

@@ -3,6 +3,7 @@ bin/
 obj/
 dist/
 publish/
+artifacts/
 
 # Visual Studio / Rider
 .vs/
@@ -30,6 +31,11 @@ packages/
 *.local.json
 *.secrets.json
 
-# Local maintainer tools (not published)
-.local-tools/
+# Local release scratch
 .release-work/
+DeskRealm_v*.zip
+
+# Track the generic, secret-free release helper and its documentation.
+.local-tools/*
+!.local-tools/README.md
+!.local-tools/Publish-DeskRealmRelease.ps1

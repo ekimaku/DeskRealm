@@ -13,6 +13,8 @@ internal sealed class KeyboardInputService
     private const ushort VK_MENU = 0x12;
     private const ushort VK_LEFT = 0x25;
     private const ushort VK_RIGHT = 0x27;
+    private const ushort VK_D = 0x44;
+    private const ushort VK_F4 = 0x73;
 
     private readonly FileLogger _logger;
 
@@ -102,6 +104,33 @@ internal sealed class KeyboardInputService
         {
             var error = Marshal.GetLastWin32Error();
             throw new InvalidOperationException($"SendInput failed for Win+Ctrl+{arrowName}. Sent={sent}/{inputs.Length}, Win32Error={error}, INPUT cbSize={inputSize}.");
+        }
+    }
+
+
+    public void CreateVirtualDesktop()
+    {
+        SendVirtualDesktopShortcut(VK_D, "D", "Win+Ctrl+D");
+    }
+
+    public void CloseCurrentVirtualDesktop()
+    {
+        SendVirtualDesktopShortcut(VK_F4, "F4", "Win+Ctrl+F4");
+    }
+
+    private void SendVirtualDesktopShortcut(ushort key, string keyName, string label)
+    {
+        var inputSize = Marshal.SizeOf<INPUT>();
+        _logger.Info($"Keyboard virtual-desktop action: {label} (INPUT cbSize={inputSize}).");
+        var inputs = new[]
+        {
+            KeyDown(VK_LWIN), KeyDown(VK_CONTROL), KeyDown(key), KeyUp(key), KeyUp(VK_CONTROL), KeyUp(VK_LWIN)
+        };
+        var sent = SendInput((uint)inputs.Length, inputs, inputSize);
+        if (sent != (uint)inputs.Length)
+        {
+            var error = Marshal.GetLastWin32Error();
+            throw new InvalidOperationException($"SendInput failed for {label} ({keyName}). Sent={sent}/{inputs.Length}, Win32Error={error}, INPUT cbSize={inputSize}.");
         }
     }
 

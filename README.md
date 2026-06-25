@@ -1,203 +1,84 @@
-# DeskRealm v0.6.0
+# DeskRealm v0.7.0
 
-**DeskRealm turns Windows virtual desktops into real, separated Desktop realms.**
+> **Current public release:** v0.7.0
 
-Each Windows virtual desktop gets its own Desktop folder, its own icon layout, and optional direct hotkeys. Instead of every `Win + Tab` workspace showing the same Desktop clutter, DeskRealm redirects the current user's Windows Desktop Known Folder to the folder assigned to the active virtual desktop.
+DeskRealm makes Windows virtual desktops feel like real, visible workspaces. Give each desktop its own name, wallpaper, icon layout, hotkey, protection state and default-startup role — then control those settings directly from a single Realm Studio card instead of hunting through scattered Windows surfaces.
 
-> Example: `Personnal`, `Work`, `Dev`, `Music`, `Gaming` can each display their own Desktop icons and shortcuts.
+**Realm Studio is the v0.7.0 rework:** a modern WinUI 3 dashboard where each realm is both a clear visual summary and an instinctive control surface. Switch a workspace, preview or change its wallpaper, edit a hotkey inline, lock every saved layout, choose the default realm and manage variants without bouncing through a chain of settings dialogs. DeskRealm stays native to Windows: no overlay desktop, no fake workspace layer and no private virtual-desktop COM dependency.
 
-![DeskRealm demo](https://github.com/user-attachments/assets/92279b78-2661-4f68-87e2-e7bf9da902c8)
+## See Realm Studio in action
 
-## Status
+**Desktop realm switching and layout continuity**
 
-`v0.6.0` is the current public release. It supersedes earlier `0.5.x` builds and is the recommended baseline for new installs and upgrades. Local runtime testing validated startup recovery, locked-variant save integrity and the parallel hotkey pipeline before publication.
+![DeskRealm switching between Windows desktop realms while keeping each workspace organised](https://github.com/user-attachments/assets/80818a95-7ed6-40e8-915c-afb4475325f5)
 
-DeskRealm intentionally touches the Windows Desktop Known Folder. Read the safety notes before running it, especially if your Desktop is synchronized by OneDrive.
+**Realm Studio — direct wallpaper, hotkey, lock and default controls from each realm card**
 
-## What v0.6.0 improves
+![Realm Studio dashboard showing direct per-realm controls](https://github.com/user-attachments/assets/33d0f1e5-d6c0-4177-9074-ee8a20178d12)
 
-The goal of `v0.6.0` is simple: DeskRealm should feel like the target Desktop realm is already ready when Windows finishes moving to the virtual desktop.
+## What DeskRealm gives you
 
-| Before | v0.6.0 behavior | User-visible gain |
-|---|---|---|
-| DeskRealm waited fixed amounts of time after a switch. | DeskRealm watches concrete Windows/Explorer state and moves on as soon as the required state is true. | Less artificial waiting and fewer delayed icon restores. |
-| Direct hotkeys navigated first, then loaded the destination realm. | The destination realm is resolved immediately; after the source layout is saved, Windows navigation and target layout preparation run together. | The realm can converge while the Windows desktop animation is still happening. |
-| Icon operations could start a separate worker process per operation. | One persistent STA worker handles icon save/restore commands for the session. | Less process-start overhead during switches and manual layout actions. |
-| Explorer could be accepted too early while still showing old icons. | DeskRealm requires exact target realm membership before restore success is logged. | Fewer false “restored” states and fewer mixed-realm layouts. |
-| Reboot/logon could leave the Known Folder already on a realm and skip restore. | The first process reconciliation restores the active realm once even if the folder already matches. | Saved icon layouts recover after forced close/reboot instead of relying on graceful shutdown. |
-| Manual save on locked layouts could affect more than the active topology variant. | Manual save is scoped to the current display topology and integrity-checks all preserved variants. | Safer multi-monitor/topology variant management. |
+- **A distinct space for every Windows virtual desktop:** each realm can use its own managed Desktop folder or the original Windows Desktop folder, with GUID-based identity that survives desktop reordering.
+- **Per-workspace icon layouts:** DeskRealm saves and restores icon positions for each realm and each display topology, so a laptop setup and a multi-monitor setup can stay intentional.
+- **Wallpapers that stay honest:** change a wallpaper from the Realm Studio preview, or let DeskRealm import a readable wallpaper change made directly in Windows.
+- **Hotkeys without a settings maze:** assign or edit a realm hotkey directly on its card, with capture, reset, save and cancel actions where you need them.
+- **Clear protection:** lock a whole realm or retain individual variant locks. The glyph always represents the current state, while the tooltip tells you the next action.
+- **A real startup workspace:** mark one realm as the default, choose whether DeskRealm starts visible or quietly in the notification area, and keep this separate from Windows startup registration.
+- **Safe Windows-name updates:** rename a virtual desktop and explicitly choose whether Task View applies the new name on next reboot or through an immediate Explorer restart.
 
-## Highlights in v0.6.0
+## How it works
 
-### Adaptive switching instead of fixed waits
+DeskRealm maps each Windows virtual-desktop GUID to a realm profile. It changes the current user’s Desktop Known Folder during a realm switch, uses Explorer-backed icon-layout persistence, and preserves the original physical Windows Desktop folder when that native realm is relabeled.
 
-- Virtual desktop changes are observed through Windows registry notifications instead of a periodic WinForms timer.
-- Registry notification bursts are coalesced into one serialized reconciliation lane.
-- DeskRealm hotkeys wait for the physical modifiers to be released, then start Windows navigation and target-realm loading/restoration in parallel. The destination GUID, realm path and topology variant are resolved before navigation; the final active GUID commits the transaction or triggers explicit compensation to the realm Windows actually reached.
-- Realm switching, icon capture, icon restore and the matching main-window actions share one serialized background lane away from the WinForms UI thread.
-- The Shell view is accepted only when it contains the exact target realm entries; partially transitioned Explorer views are rejected, including invalidated item positions during multi-desktop jumps.
-- Icon positions are applied and verified adaptively instead of sleeping for fixed settle/retry delays. Explorer view changes during enumeration are treated as bounded transition state, not as permanent persistence failure.
+It does **not** move files during an ordinary realm switch. It does **not** send realm names, icon names, paths, wallpapers, configuration or telemetry to a remote service.
 
-### Persistent icon-layout worker
+## Important safety boundary
 
-- One persistent STA worker handles icon capture and restore commands for the session.
-- The worker protocol is strict JSON Lines over BOM-free UTF-8.
-- Request/response GUIDs prevent stale or crossed responses from being accepted.
-- Worker failures are explicit and disable icon persistence for the current session; realm switching remains available.
+DeskRealm changes the current user’s **Desktop Known Folder** so Explorer displays the folder linked to the active realm. Read [Safety and privacy](docs/SAFETY_AND_PRIVACY.md) before use, especially when OneDrive Desktop backup is enabled.
 
-### Targeted Shell refresh
+DeskRealm never renames, moves or remaps the physical original Windows Desktop folder from Realm Studio.
 
-- DeskRealm sends a targeted Shell directory notification for the new realm.
-- The old global `WM_SETTINGCHANGE` broadcast is not used.
-- Explorer readiness and icon membership remain the actual proof that the transition completed.
+## Install and run
 
-### Preserved UX foundations
+Use a release asset from the GitHub Releases page:
 
-- Branded executable/tray/window icon.
-- First-run onboarding and safe original Desktop association.
-- Capture-based hotkey editor.
-- Layout, realm and exact topology-variant locks.
-- Manual save overwrites only the active display-topology variant; every non-current variant is integrity-checked and preserved.
-- Multi-display variant details and confirmation-gated variant deletion.
-- Updated README demo GIF and tray-first modern UI.
+- **Portable ZIP:** extract it, then run `DeskRealm.App.exe`.
+- **Install bundle:** extract it, review `Install-DeskRealm.ps1`, then run it from PowerShell.
 
-## Core features
-
-- Per-virtual-desktop Desktop folders.
-- Folder names synchronized from Windows Task View / `Win + Tab` names.
-- Existing realm folders are renamed, not duplicated, when workspace names change.
-- Per-realm Desktop icon layout save/restore.
-- Display-topology-aware icon layouts for monitor, resolution, orientation and DPI / scale changes.
-- Adaptive and verified icon restore after switches.
-- First-launch reconciliation restores the saved layout even when Windows already left the Desktop Known Folder on the active realm after reboot or forced session termination.
-- Shell identity fallback for repeated shortcuts/icons across realms.
-- Global direct desktop hotkeys.
-- Tray-first runtime with an onboarding/settings window.
-- UI-controlled layout, realm and variant locks.
-- Emergency restore script for the original Desktop path.
-
-## Important safety note
-
-DeskRealm changes the current user's Windows Desktop Known Folder path while it runs. This is powerful, but it is not a visual overlay. Before testing:
-
-1. Make sure your Desktop is not synchronized by OneDrive, or keep `rejectOneDriveDesktop` enabled.
-2. Keep a backup of important Desktop files.
-3. Keep the emergency restore script available.
-4. Disable Windows Desktop icon auto-arrange if you want icon positions to remain stable.
-
-## Requirements
-
-- Windows 10 or Windows 11.
-- Explorer must be the shell rendering the Desktop.
-- Release downloads are self-contained `win-x64` artifacts and require no separate .NET installation.
-- Source builds require the .NET 10 SDK selected by `global.json`.
-
-## Install / download
-
-For normal users, use the GitHub Release artifacts instead of building manually.
-
-### Portable ZIP
-
-1. Download `DeskRealm-<version>-win-x64-portable.zip` from the latest release.
-2. Extract it somewhere stable, for example `%LOCALAPPDATA%\Programs\DeskRealm`.
-3. Run `DeskRealm.App.exe`.
-4. On a fresh config, complete first-run setup before the first automatic switch.
-5. Enable **Start with Windows** from the tray or UI if desired.
-
-### Install bundle
-
-The release workflow also produces `DeskRealm-<version>-win-x64-install-bundle.zip`:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\Install-DeskRealm.ps1 -StartAfterInstall -StartWithWindows
-```
-
-See [`docs/INSTALLATION.md`](docs/INSTALLATION.md).
-
-## Build from source
-
-From the repository root on Windows:
-
-```powershell
-.\scripts\Build-Release.ps1
-```
-
-Output:
-
-```text
-.\dist\DeskRealm\DeskRealm.App.exe
-```
-
-## Run from source
+For source development:
 
 ```powershell
 .\scripts\Run-DeskRealm.ps1
 ```
 
-## Emergency restore
+For a portable self-contained build:
 
 ```powershell
-.\scripts\Restore-Desktop.ps1
+.\scripts\Build-Release.ps1
+.\dist\DeskRealm\DeskRealm.App.exe
 ```
 
-The script reads `%APPDATA%\DeskRealm\deskrealm.config.json` and restores `originalDesktopPath`.
+The release flow deliberately stays boring:
 
-## Configuration
-
-Config file:
-
-```text
-%APPDATA%\DeskRealm\deskrealm.config.json
-```
-
-Current config version: `11`.
-
-Key v0.6.0 fields:
-
-```json
-{
-  "version": 11,
-  "enabled": true,
-  "iconLayoutPersistenceEnabled": true,
-  "iconLayoutWorkerTimeoutMs": 8000,
-  "shellViewReadyTimeoutMs": 2500,
-  "iconLayoutRestoreVerificationTimeoutMs": 1400,
-  "hotkeyModifierReleaseTimeoutMs": 1200,
-  "desktopStepConfirmationTimeoutMs": 1800,
-  "desktopHotkeysEnabled": true,
-  "desktopHotkeys": {
-    "1": "Win+Shift+X",
-    "2": "Win+Shift+C",
-    "3": "Win+Shift+B",
-    "4": "Win+Shift+N"
-  },
-  "lockedIconLayouts": {},
-  "lockedRealms": {},
-  "lockedIconLayoutVariants": {}
-}
-```
-
-The timeout fields are maximum guardrails. They do not impose normal fixed waits.
-
-See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
+1. clean generated output;
+2. restore `win-x64` dependencies;
+3. build Release;
+4. publish a self-contained single-file `win-x64` app;
+5. verify `DeskRealm.App.exe` exists.
 
 ## Documentation
 
-- [`CHANGELOG.md`](CHANGELOG.md)
-- [`docs/release-notes/v0.6.0.md`](docs/release-notes/v0.6.0.md)
-- [`docs/patch-notes/PATCH_NOTES_v0_6_0_PERFORMANCE_PIPELINE.md`](docs/patch-notes/PATCH_NOTES_v0_6_0_PERFORMANCE_PIPELINE.md)
-- [`docs/INSTALLATION.md`](docs/INSTALLATION.md)
-- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/SAFETY_AND_PRIVACY.md`](docs/SAFETY_AND_PRIVACY.md)
-- [`docs/TECHNICAL_AUDIT.md`](docs/TECHNICAL_AUDIT.md)
-- [`docs/validation/v0.6.0-release-control.md`](docs/validation/v0.6.0-release-control.md)
-- [`SMOKE_TEST.md`](SMOKE_TEST.md)
+- [Installation](docs/INSTALLATION.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Safety and privacy](docs/SAFETY_AND_PRIVACY.md)
+- [Smoke test](SMOKE_TEST.md)
+- [Release process](docs/RELEASE_PROCESS.md)
+- [Release checklist](docs/GITHUB_RELEASE_CHECKLIST.md)
+- [Technical audit](docs/TECHNICAL_AUDIT.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Changelog](CHANGELOG.md)
 
-## License
+## Development history
 
-Apache License 2.0. See [`LICENSE`](LICENSE).
-
-## Attribution / citation
-
-DeskRealm is created by **Ayahua**. See [`CITATION.cff`](CITATION.cff) and [`docs/ATTRIBUTION_GUIDE.md`](docs/ATTRIBUTION_GUIDE.md).
+Completed local implementation TODOs and candidate notes are retained under [docs/history](docs/history/README.md). They are historical records only; they are not part of the build or release pipeline.

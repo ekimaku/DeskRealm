@@ -1,55 +1,34 @@
 # DeskRealm release process
 
-## Development milestone rule
+## PowerShell source compatibility
 
-During an unpublished milestone, the application/version metadata stays on the target release number (currently `0.6.0`). Local source archives use alphabetical suffixes only in the ZIP filename to preserve chronological order. Do not create intermediate Git tags or increment the application version for candidate fixes.
+All executable `*.ps1` files in DeskRealm are intentionally ASCII-only. Public Markdown documents may use Unicode typography, but PowerShell scripts must construct any required Unicode characters at runtime. This keeps Windows PowerShell 5.1 parsing deterministic when a repository is extracted without a UTF-8 BOM.
 
-Example local archive sequence:
+## Local release validation
+
+1. Start from a clean extracted repository folder or a clean Git worktree.
+2. Run `./scripts/Prepare-GitHubRelease.ps1 -Version X.Y.Z`.
+3. Confirm `dist/DeskRealm/DeskRealm.App.exe` exists.
+4. Launch the portable EXE and complete the relevant `SMOKE_TEST.md` matrix.
+5. Keep `VERSION.txt`, project version, `CHANGELOG.md` and `docs/release-notes/vX.Y.Z.md` aligned.
+6. Review `git status` before committing. Generated output, config, logs and release artifacts are never committed.
+
+## CI policy
+
+GitHub Actions uses two security scopes:
 
 ```text
-DeskRealm_v0_6_0_aa.zip
-DeskRealm_v0_6_0_ab.zip
-DeskRealm_v0_6_0_ac.zip
+pull request / main push
+→ read-only Windows restore → build → publish → artifact upload
+
+tag vX.Y.Z
+→ same Windows build artifact
+→ tag-only release job with contents: write
+→ GitHub release + ZIPs + SHA256SUMS.txt
 ```
 
-The final approved repository state is released once as Git tag `v0.6.0`.
+The tag must match `VERSION.txt`, and `docs/release-notes/vX.Y.Z.md` must exist. Local suffixes such as `_bi` are never compiled, tagged or exposed as public application versions.
 
-## Pre-release validation
+## Public release rule
 
-```powershell
-.\scripts\Run-DeskRealm.ps1
-.\scripts\Build-Release.ps1
-```
-
-Complete `SMOKE_TEST.md` and verify `VERSION.txt`, the project version, CHANGELOG and release notes all agree.
-
-## Release helper
-
-Dry run first:
-
-```powershell
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.6.0 -DryRun
-```
-
-Publish only after the milestone is approved:
-
-```powershell
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.6.0
-```
-
-Equivalent manual flow:
-
-```powershell
-git add .
-git commit -m "Release DeskRealm v0.6.0"
-git push origin main
-git tag -a v0.6.0 -m "DeskRealm v0.6.0"
-git push origin v0.6.0
-```
-
-Expected release assets:
-
-- `DeskRealm-0.6.0-win-x64-portable.zip`
-- `DeskRealm-0.6.0-win-x64-install-bundle.zip`
-
-GitHub release notes are sourced from `docs/release-notes/v0.6.0.md` and the release-helper-compatible `## v0.6.0` section in `CHANGELOG.md`.
+Publish only after a Windows build, portable launch and focused smoke validation. For DeskRealm, the critical smoke set includes realm switch/layout restore, native Desktop safety, rename → Explorer restart/reboot → Task View, tray recovery, wallpaper sync, direct controls and archive-resolution behavior.

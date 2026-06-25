@@ -1,33 +1,56 @@
-$ErrorActionPreference = "Stop"
+[CmdletBinding()]
+param(
+    [switch]$SkipClean
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
-$Project = Join-Path $Root "src\DeskRealm.App\DeskRealm.App.csproj"
-$Dist = Join-Path $Root "dist\DeskRealm"
+$Project = Join-Path $Root 'src\DeskRealm.App\DeskRealm.App.csproj'
+$Dist = Join-Path $Root 'dist\DeskRealm'
+$Runtime = 'win-x64'
 
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
-    throw "dotnet SDK introuvable. Installe le .NET 10 SDK puis relance ce script."
+    throw 'dotnet SDK was not found. Install the SDK selected by global.json, then run this script again.'
 }
 
-if (Test-Path $Dist) {
-    Remove-Item $Dist -Recurse -Force
+if (-not (Test-Path -LiteralPath $Project)) {
+    throw "DeskRealm project file was not found: $Project"
 }
 
-New-Item -ItemType Directory -Path $Dist -Force | Out-Null
+if (-not $SkipClean) {
+    & (Join-Path $PSScriptRoot 'Clean-DeskRealm.ps1') -All
+}
 
-dotnet restore $Project
+# Keep the release path conventional and inspectable: restore the publish RID,
+# compile Release, then publish the same project without a second restore.
+dotnet restore $Project --runtime $Runtime
+dotnet build $Project --configuration Release --no-restore
 dotnet publish $Project `
-    -c Release `
-    -r win-x64 `
+    --configuration Release `
+    --runtime $Runtime `
     --self-contained true `
-    -o $Dist `
+    --output $Dist `
+    --no-restore `
     /p:PublishSingleFile=true `
+    /p:WindowsAppSDKSelfContained=true `
     /p:IncludeNativeLibrariesForSelfExtract=true `
     /p:PublishTrimmed=false
 
-Copy-Item (Join-Path $Root "LICENSE") $Dist -Force
-Copy-Item (Join-Path $Root "NOTICE") $Dist -Force
-Copy-Item (Join-Path $Root "README.md") $Dist -Force
-Copy-Item (Join-Path $Root "VERSION.txt") $Dist -Force
-Copy-Item (Join-Path $Root "scripts\Restore-Desktop.ps1") $Dist -Force
+$RequiredFiles = @(
+    (Join-Path $Dist 'DeskRealm.App.exe'),
+    (Join-Path $Root 'VERSION.txt')
+)
+foreach ($RequiredFile in $RequiredFiles) {
+    if (-not (Test-Path -LiteralPath $RequiredFile)) {
+        throw "Release build validation failed. Required file is missing: $RequiredFile"
+    }
+}
 
-Write-Host "Build terminé : $Dist" -ForegroundColor Green
+foreach ($FileName in @('LICENSE', 'NOTICE', 'README.md', 'VERSION.txt')) {
+    Copy-Item (Join-Path $Root $FileName) $Dist -Force
+}
+Copy-Item (Join-Path $PSScriptRoot 'Restore-Desktop.ps1') $Dist -Force
+
+Write-Host "DeskRealm release build completed: $Dist" -ForegroundColor Green

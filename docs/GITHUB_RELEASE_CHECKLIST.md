@@ -1,39 +1,31 @@
-# DeskRealm GitHub release checklist — v0.6.0
+# GitHub release checklist
 
-## Source state
+## Freeze and local validation
 
-- [x] Windows Debug build/run passes on the current release package.
-- [ ] Windows self-contained Release build passes.
-- [ ] `SMOKE_TEST.md` is complete; partial local runtime validation is documented in `docs/validation/v0.6.0-release-control.md`.
-- [x] Automatic restore works on DeskRealm hotkeys in local testing.
-- [ ] Automatic restore works on native virtual desktop changes.
-- [ ] Multi-monitor variants, layout locks, realm locks and exact variant locks pass.
-- [ ] Manual save on a locked realm changes only the active topology variant; all other variants restore unchanged.
-- [ ] `VERSION.txt`, `.csproj`, `CITATION.cff`, README, CHANGELOG and release notes all say `0.6.0`.
-- [ ] No local local ZIP suffix appears in compiled/application version metadata.
-- [x] Source ZIP contains no `bin`, `obj`, `dist`, `.release-work`, `.git` directory or nested source ZIP.
+- [ ] Start from the validated v0.7.0 worktree; do not overlay a candidate ZIP onto it.
+- [ ] Run `./scripts/Prepare-GitHubRelease.ps1 -Version 0.7.0`.
+- [ ] Launch `dist/DeskRealm/DeskRealm.App.exe` and perform the final focused smoke pass from `SMOKE_TEST.md`.
+- [ ] Verify `VERSION.txt` and project version say `0.7.0`, and the public CHANGELOG/release-notes headings are titled `v0.7.0`.
+- [ ] Review README media: the realm-switching GIF uses asset `80818a95-7ed6-40e8-915c-afb4475325f5` and the Realm Studio UI GIF below it uses asset `33d0f1e5-d6c0-4177-9074-ee8a20178d12`.
+- [ ] Review `git status`; no generated output, local config, logs or release artifacts may be staged.
 
-## Dry run
+## Commit and tag
 
 ```powershell
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.6.0 -DryRun
+git add -A
+git commit -m "release: DeskRealm v0.7.0 Realm Studio"
+git tag -a v0.7.0 -m "DeskRealm v0.7.0"
+git push origin main
+git push origin v0.7.0
 ```
 
-- [ ] Review generated notes and commands.
-- [ ] Confirm the changelog parser selects `## v0.6.0`.
+## GitHub Actions and release assets
 
-## Publish one consolidated release
-
-```powershell
-.\.local-tools\Publish-DeskRealmRelease.ps1 -Version 0.6.0
-```
-
-Expected assets:
-
-- `DeskRealm-0.6.0-win-x64-portable.zip`
-- `DeskRealm-0.6.0-win-x64-install-bundle.zip`
-
-- [ ] Download and smoke-test the published portable ZIP on Windows.
-- [ ] Verify the embedded executable/tray/window icon.
-- [ ] Verify `VERSION.txt` is included in the published payload.
-- [x] Mark `v0.6.0` as the new stable public baseline.
+- [ ] Confirm the Windows build job passed for the `v0.7.0` tag.
+- [ ] Confirm the GitHub release was created from `docs/release-notes/v0.7.0.md`.
+- [ ] Confirm release assets include:
+  - `DeskRealm-0.7.0-win-x64-portable.zip`
+  - `DeskRealm-0.7.0-win-x64-install-bundle.zip`
+  - `SHA256SUMS.txt`
+- [ ] Download the portable ZIP from the GitHub release, extract it into a fresh folder, launch `DeskRealm.App.exe`, then close through the tray.
+- [ ] Mark v0.7.0 as the latest local rollback ZIP after the public asset smoke pass succeeds.

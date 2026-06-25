@@ -1,0 +1,157 @@
+<!-- DeskRealm-RealmStudio-Schema: v0.7.0 -->
+<Application
+    x:Class="DeskRealm.App.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls"
+    xmlns:primitives="using:Microsoft.UI.Xaml.Controls.Primitives">
+    <Application.Resources>
+        <!--
+          NavigationView, ToggleSwitch, ProgressRing and ContentDialog resolve stock
+          WinUI theme keys (for example TabViewButtonBackground) from this dictionary.
+          It must be merged before the local DeskRealm resources below.
+        -->
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <controls:XamlControlsResources />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!--
+              WinUI ContentDialog templates cap content at a narrow stock width by default.
+              Realm Studio resolves each frame against the live XamlRoot; this is only the
+              outer-template ceiling so a 900-DIP editor is not cropped before its own
+              geometry and body-only scrolling can apply.
+            -->
+            <x:Double x:Key="ContentDialogMaxWidth">1200</x:Double>
+
+            <SolidColorBrush x:Key="DeskRealmCanvasBrush" Color="#06101A" />
+            <SolidColorBrush x:Key="DeskRealmSurfaceBrush" Color="#0B202F" />
+            <SolidColorBrush x:Key="DeskRealmSurfaceRaisedBrush" Color="#0F2E40" />
+            <SolidColorBrush x:Key="DeskRealmBorderBrush" Color="#1D5C70" />
+            <SolidColorBrush x:Key="DeskRealmAccentBrush" Color="#2BE0DC" />
+            <SolidColorBrush x:Key="DeskRealmAmberBrush" Color="#DE9243" />
+            <SolidColorBrush x:Key="DeskRealmDangerBrush" Color="#D26F5E" />
+            <SolidColorBrush x:Key="DeskRealmMutedBrush" Color="#91B8C7" />
+            <SolidColorBrush x:Key="DeskRealmTextBrush" Color="#E7FBFF" />
+
+            <Style x:Key="DeskRealmCard" TargetType="Border">
+                <Setter Property="Background" Value="{StaticResource DeskRealmSurfaceBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource DeskRealmBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="16" />
+                <Setter Property="Padding" Value="18" />
+                <Setter Property="Margin" Value="0,0,0,12" />
+            </Style>
+            <Style x:Key="DeskRealmPrimaryButton" TargetType="Button">
+                <Setter Property="Background" Value="{StaticResource DeskRealmAccentBrush}" />
+                <Setter Property="Foreground" Value="#04252C" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Padding" Value="14,8" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style x:Key="DeskRealmSecondaryButton" TargetType="Button">
+                <Setter Property="Background" Value="{StaticResource DeskRealmSurfaceRaisedBrush}" />
+                <Setter Property="Foreground" Value="{StaticResource DeskRealmTextBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource DeskRealmBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Padding" Value="14,8" />
+            </Style>
+            <Style x:Key="DeskRealmDangerButton" TargetType="Button">
+                <Setter Property="Background" Value="#492126" />
+                <Setter Property="Foreground" Value="{StaticResource DeskRealmTextBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource DeskRealmDangerBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Padding" Value="14,8" />
+            </Style>
+            <Style x:Key="DeskRealmPill" TargetType="Border">
+                <Setter Property="Background" Value="#102E3C" />
+                <Setter Property="BorderBrush" Value="{StaticResource DeskRealmBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="12" />
+                <Setter Property="Padding" Value="9,3" />
+            </Style>
+            <Style x:Key="DeskRealmTextInput" TargetType="TextBox">
+                <Setter Property="Background" Value="#081923" />
+                <Setter Property="Foreground" Value="{StaticResource DeskRealmTextBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource DeskRealmBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="Padding" Value="12,9" />
+                <Setter Property="SelectionHighlightColor" Value="#5070E0DC" />
+            </Style>
+            <Style x:Key="DeskRealmTitleBarSurface" TargetType="Border">
+                <Setter Property="Background" Value="{StaticResource DeskRealmSurfaceBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource DeskRealmBorderBrush}" />
+                <Setter Property="BorderThickness" Value="0,0,0,1" />
+            </Style>
+            <Style x:Key="DeskRealmModalDialog" TargetType="ContentDialog">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="CornerRadius" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            </Style>
+            <Style x:Key="DeskRealmModalFrame" TargetType="Border">
+                <Setter Property="Background" Value="#081B28" />
+                <Setter Property="BorderBrush" Value="{StaticResource DeskRealmAccentBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="20" />
+            </Style>
+            <Style x:Key="DeskRealmModalSection" TargetType="Border">
+                <Setter Property="Background" Value="#0B2434" />
+                <Setter Property="BorderBrush" Value="#1A5B70" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="14" />
+                <Setter Property="Padding" Value="16" />
+                <Setter Property="Margin" Value="0,0,0,12" />
+            </Style>
+            <Style x:Key="DeskRealmModalCloseButton" TargetType="Button">
+                <Setter Property="Background" Value="#112834" />
+                <Setter Property="Foreground" Value="{StaticResource DeskRealmTextBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource DeskRealmDangerBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="18" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Width" Value="36" />
+                <Setter Property="Height" Value="36" />
+                <Setter Property="FontSize" Value="18" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style x:Key="DeskRealmOutlineToggleButton" TargetType="primitives:ToggleButton">
+                <Setter Property="Background" Value="#0A2230" />
+                <Setter Property="Foreground" Value="{StaticResource DeskRealmTextBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource DeskRealmAccentBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="Padding" Value="14,8" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style x:Key="DeskRealmOutlineButton" TargetType="Button">
+                <Setter Property="Background" Value="#0A2230" />
+                <Setter Property="Foreground" Value="{StaticResource DeskRealmTextBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource DeskRealmAccentBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="Padding" Value="14,8" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style x:Key="DeskRealmQuickActionButton" TargetType="Button">
+                <Setter Property="Width" Value="34" />
+                <Setter Property="Height" Value="34" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Background" Value="#102E3C" />
+                <Setter Property="Foreground" Value="{StaticResource DeskRealmTextBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource DeskRealmAccentBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="17" />
+                <Setter Property="FontSize" Value="15" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

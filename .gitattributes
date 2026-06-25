@@ -8,3 +8,9 @@
 *.cff text eol=lf
 LICENSE text eol=lf
 NOTICE text eol=lf
+# Windows development scripts and app sources
+*.ps1 text eol=crlf
+*.cs text eol=crlf
+*.xaml text eol=crlf
+*.csproj text eol=crlf
+*.md text eol=lf

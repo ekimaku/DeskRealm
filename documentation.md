@@ -1,26 +1,35 @@
-# DeskRealm technical project state
+# DeskRealm development journal
 
-Current development milestone: `v0.6.0` adaptive performance pipeline.
+## 2026-06-25 — v0.7.0 release freeze
 
-Reboot recovery note: the first process reconciliation now restores the active realm once even when Windows already left the Desktop Known Folder on that realm. This prevents the old `Already on` shortcut from bypassing layout restoration after an unclean shutdown.
+DeskRealm v0.7.0 closes the Realm Studio modernization cycle. The project moved from a WinForms management surface to a WinUI 3 dashboard and unified modal host while preserving the Windows-first core: virtual desktop GUID identity, Desktop Known Folder switching, Shell-backed icon layouts and explicit user-visible recovery behavior.
 
-Stable public baseline: `v0.6.0`.
+### Validated Windows discoveries carried into the release
 
-The milestone was rebuilt from the verified local source archive and is now the public `0.6.0` baseline. Internal candidate ordering is represented only by the local ZIP filename; the project, application and Git release remain `0.6.0`.
+- Explorer Registry desktop-name metadata is persistent, but Task View reloads it only after an Explorer restart or reboot. DeskRealm therefore gives the user an explicit choice rather than pretending the rename is instant.
+- Explorer owns the notification area. When it restarts, DeskRealm must re-register its tray icon after the `TaskbarCreated` notification.
+- The native/original Desktop realm can be relabeled safely, but the physical Desktop folder must remain untouched.
+- Wallpaper state needs bidirectional reconciliation: DeskRealm can apply a selected image, and it can import a readable Windows assignment changed externally.
+- Direct realm-card controls need shared runtime services and unified modal orchestration; duplicating hotkey/wallpaper logic per card created avoidable state races.
 
-## Current block
+### Release hardening
 
-- Event-driven virtual desktop monitoring.
-- Serialized off-UI lane shared by tray, hotkeys, registry reconciliation and main-window Shell/state actions.
-- Parallel direct-hotkey transaction: source save first, then confirmed Windows navigation and pre-resolved destination realm/layout preparation together, followed by final GUID commit or explicit actual-realm compensation.
-- Persistent strict icon-layout worker.
-- Adaptive Explorer readiness and icon-position verification.
-- Stable live Shell-view enumeration through `IFolderView::Items` / `IEnumIDList`; `E_BOUNDS` / `E_CHANGED_STATE`, plus transition-scoped `GetItemPosition` `E_FAIL` during automatic multi-desktop jumps, remain bounded transition states instead of disabling persistence.
-- .NET 10 / C# 14 source migration.
-- Full preservation of the existing UX and safety model while replacing the fragile runtime path.
+The candidate-template/source-repair maze is gone. Release compilation is now ordinary Windows .NET work: restore the publish RID, build Release, publish self-contained `win-x64`, validate the executable and smoke-test it.
 
-See `TODO_v0.6.0-performance.md`, `docs/TECHNICAL_AUDIT.md` and `SMOKE_TEST.md`.
+The v0.7.0 release workflow builds on `main`, pull requests and tags with read-only permissions. A separate tag-only job creates the GitHub Release and attaches the portable/install-bundle ZIPs plus SHA-256 checksums.
 
-## v0.6.0 — manual current-variant save integrity
+### Next
 
-The confirmation-gated manual save path now uses a dedicated `save-current-variant` worker command. It replaces only the exact active display-topology variant. Every non-current variant is fingerprinted before mutation and after JSON serialization/deserialization; any mismatch aborts before the layout file is written. Creating a new topology at the 24-variant limit fails explicitly instead of evicting the oldest variant.
+The project is intentionally not jumping straight into more Shell features. The next milestones are recorded in `docs/ROADMAP.md`: testability/service boundaries first, diagnostics/supportability second, then distribution and compatibility hardening for a v1.0.0 contract.
+
+## 2026-06-25 — Release storytelling and README media alignment
+
+The public v0.7.0 story was corrected to match the actual user value of the release. The README and release notes now lead with Realm Studio as an immediate-control dashboard rather than leading with internal Shell mechanics: each virtual desktop can be switched, previewed, wallpapered, hotkeyed, protected and selected as the default directly from its realm card.
+
+Two current GitHub-hosted demonstration GIFs are documented in the README: the first shows realm switching and layout continuity; the second shows the Realm Studio UI and its direct controls. The changelog release heading is standardized as `v0.7.0` with a public title so the local release helper recognises it deterministically.
+
+## 2026-06-25 — v0.7.0 release helper encoding repair (`_bl`)
+
+- Windows PowerShell 5.1 failed to parse `Prepare-GitHubRelease.ps1` because a raw UTF-8 em dash in a double-quoted error message could be decoded as a smart quote in a no-BOM script.
+- The public CHANGELOG remains intentionally typographic (`## v0.7.0 — Realm Studio: ...`). The helper now constructs the separator at runtime with `[char]0x2014`; all executable PowerShell source remains ASCII-only.
+- This is a release-tooling repair only; no DeskRealm runtime behavior changed.
